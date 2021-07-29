@@ -17,6 +17,7 @@
 #include "ospray/ospray_cpp.h"
 #include "ospray/ospray_cpp/ext/rkcommon.h"
 #include "ospray/ospray_util.h"
+#include "GravitySpheresVolume.h"
 
 using namespace ospray;
 using namespace rkcommon;
@@ -168,62 +169,94 @@ vec3i computeGrid(int num)
 
 VolumeBrick makeLocalVolume(const int mpiRank, const int mpiWorldSize)
 {
-  const vec3i grid = computeGrid(mpiWorldSize);
-  const vec3i brickId(mpiRank % grid.x,
-      (mpiRank / grid.x) % grid.y,
-      mpiRank / (grid.x * grid.y));
-  // The bricks are 64^3 + 1 layer of ghost voxels on each axis
-  const vec3i brickVolumeDims = vec3i(32);
-  const vec3i brickGhostDims = vec3i(brickVolumeDims + 2);
+#if 0
+    const vec3i grid = computeGrid(mpiWorldSize);
+    const vec3i brickId(mpiRank % grid.x,
+        (mpiRank / grid.x) % grid.y,
+        mpiRank / (grid.x * grid.y));
+    // The bricks are 64^3 + 1 layer of ghost voxels on each axis
+    const vec3i brickVolumeDims = vec3i(32);
+    const vec3i brickGhostDims = vec3i(brickVolumeDims + 2);
 
-  // The grid is over the [0, grid * brickVolumeDims] box
-  worldBounds = box3f(vec3f(0.f), vec3f(grid * brickVolumeDims));
-  const vec3f brickLower = brickId * brickVolumeDims;
-  const vec3f brickUpper = brickId * brickVolumeDims + brickVolumeDims;
+    // The grid is over the [0, grid * brickVolumeDims] box
+    worldBounds = box3f(vec3f(0.f), vec3f(grid * brickVolumeDims));
+    const vec3f brickLower = brickId * brickVolumeDims;
+    const vec3f brickUpper = brickId * brickVolumeDims + brickVolumeDims;
 
+    VolumeBrick brick;
+    brick.bounds = box3f(brickLower, brickUpper);
+    std::cerr << brickLower << " to " << brickUpper << std::endl;
+    // we just put ghost voxels on all sides here, but a real application
+    // would change which faces of each brick have ghost voxels dependent
+    // on the actual data
+    brick.ghostBounds = box3f(brickLower - vec3f(1.f), brickUpper + vec3f(1.f));
+
+    brick.brick = cpp::Volume("structuredRegular");
+
+    brick.brick.setParam("dimensions", brickGhostDims);
+
+    // we use the grid origin to place this brick in the right position inside
+    // the global volume
+    brick.brick.setParam("gridOrigin", brick.ghostBounds.lower);
+
+    // generate the volume data to just be filled with this rank's id
+    const size_t nVoxels = brickGhostDims.x * brickGhostDims.y * brickGhostDims.z;
+    std::vector<uint8_t> volumeData(nVoxels, static_cast<uint8_t>(mpiRank));
+    brick.brick.setParam("data",
+        cpp::CopiedData(static_cast<const uint8_t *>(volumeData.data()),
+            vec3ul(brickVolumeDims)));
+
+    brick.brick.commit();
+
+    brick.model = cpp::VolumetricModel(brick.brick);
+    cpp::TransferFunction tfn("piecewiseLinear");
+    std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
+    std::vector<float> opacities = {0.05f, 1.f};
+
+    tfn.setParam("color", cpp::CopiedData(colors));
+    tfn.setParam("opacity", cpp::CopiedData(opacities));
+    // color the bricks by their rank, we pad the range out a bit to keep
+    // any brick from being completely transparent
+    vec2f valueRange = vec2f(0, mpiWorldSize);
+    tfn.setParam("valueRange", valueRange);
+    tfn.commit();
+    brick.model.setParam("transferFunction", tfn);
+    brick.model.setParam("samplingRate", std::atof(getenv("SAMPLERATE")));
+    brick.model.commit();
+
+    brick.group = cpp::Group();
+    brick.group.setParam("volume", cpp::CopiedData(brick.model));
+    brick.group.commit();
+
+#else
   VolumeBrick brick;
-  brick.bounds = box3f(brickLower, brickUpper);
-  // we just put ghost voxels on all sides here, but a real application
-  // would change which faces of each brick have ghost voxels dependent
-  // on the actual data
-  brick.ghostBounds = box3f(brickLower - vec3f(1.f), brickUpper + vec3f(1.f));
 
-  brick.brick = cpp::Volume("structuredRegular");
+  GravitySpheres gs(true);
+  brick.brick = gs.getVolume();
 
-  brick.brick.setParam("dimensions", brickGhostDims);
-
-  // we use the grid origin to place this brick in the right position inside
-  // the global volume
-  brick.brick.setParam("gridOrigin", brick.ghostBounds.lower);
-
-  // generate the volume data to just be filled with this rank's id
-  const size_t nVoxels = brickGhostDims.x * brickGhostDims.y * brickGhostDims.z;
-  std::vector<uint8_t> volumeData(nVoxels, static_cast<uint8_t>(mpiRank));
-  brick.brick.setParam("data",
-      cpp::CopiedData(static_cast<const uint8_t *>(volumeData.data()),
-          vec3ul(brickVolumeDims)));
-
-  brick.brick.commit();
+  float x0 = (2.0*mpiRank)/mpiWorldSize - 1.0;
+  float x1 = (2.0*(mpiRank+1))/mpiWorldSize - 1.0;
+  brick.bounds = box3f(vec3f(x0, -1.f, -1.f), vec3f(x1, 1.f, 1.f));
+  worldBounds = box3f(vec3f(-1.f), vec3f(1.f));
+  std::cerr << mpiRank << " BBOUNDS = " << brick.bounds << std::endl;
 
   brick.model = cpp::VolumetricModel(brick.brick);
   cpp::TransferFunction tfn("piecewiseLinear");
   std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
-  std::vector<float> opacities = {0.05f, 1.f};
-
+  std::vector<float> opacities = {0.05f, 1.0f};
   tfn.setParam("color", cpp::CopiedData(colors));
   tfn.setParam("opacity", cpp::CopiedData(opacities));
-  // color the bricks by their rank, we pad the range out a bit to keep
-  // any brick from being completely transparent
-  vec2f valueRange = vec2f(0, mpiWorldSize);
+  vec2f valueRange = vec2f(0, 10.0);
   tfn.setParam("valueRange", valueRange);
   tfn.commit();
   brick.model.setParam("transferFunction", tfn);
-  brick.model.setParam("samplingRate", 0.5f);
+  brick.model.setParam("samplingRate", std::atof(getenv("SAMPLERATE")));
   brick.model.commit();
 
   brick.group = cpp::Group();
   brick.group.setParam("volume", cpp::CopiedData(brick.model));
   brick.group.commit();
+#endif
 
   brick.instance = cpp::Instance(brick.group);
   brick.instance.commit();
