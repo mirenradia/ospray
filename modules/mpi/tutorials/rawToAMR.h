@@ -28,10 +28,14 @@ void makeAMR(const std::vector<float> &in,
     const int blockSize,
     const int refinementLevel,
     const float threshold,
+    const int rank,
+    const int numranks,
     std::vector<box3i> &blockBounds,
     std::vector<int> &refinementLevels,
     std::vector<float> &cellWidths,
-    std::vector<std::vector<float>> &brickData);
+    std::vector<std::vector<float>> &brickData,
+    std::vector<int> &owners,
+    std::vector<vec3i> &levelDims);
 
 void outputAMR(const FileName outFileBase,
     const std::vector<box3i> &blockBounds,

@@ -93,6 +93,7 @@ ospray_create_mpi_tutorial(ospMPIDistribTutorialSpheres
 ospray_sign_target(ospMPIDistribTutorialSpheres)
 
 ospray_create_mpi_tutorial(ospMPIDistribTutorialVolume
+  wombat.cxx
   rawToAMR.cpp
   GravitySpheresVolume.cpp
   ospMPIDistribTutorialVolume.cpp

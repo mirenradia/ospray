@@ -31,7 +31,7 @@ struct VolumeBrick
   cpp::Group group;
   cpp::Instance instance;
   // the bounds of the owned portion of data
-  box3f bounds;
+  std::vector<box3f> bounds;
   // the full bounds of the owned portion + ghost voxels
   box3f ghostBounds;
 };
@@ -221,7 +221,7 @@ VolumeBrick makeLocalVolume(const int mpiRank, const int mpiWorldSize)
     tfn.setParam("valueRange", valueRange);
     tfn.commit();
     brick.model.setParam("transferFunction", tfn);
-    brick.model.setParam("samplingRate", std::atof(getenv("SAMPLERATE")));
+    brick.model.setParam("samplingRate", 0.01f);
     brick.model.commit();
 
     brick.group = cpp::Group();
@@ -231,26 +231,30 @@ VolumeBrick makeLocalVolume(const int mpiRank, const int mpiWorldSize)
 #else
   VolumeBrick brick;
 
-  GravitySpheres gs(true);
+  GravitySpheres gs(true, mpiRank, mpiWorldSize);
+  std::vector<box3f> myregions;
+  gs.getRegions(myregions);
   brick.brick = gs.getVolume();
 
   float x0 = (2.0*mpiRank)/mpiWorldSize - 1.0;
   float x1 = (2.0*(mpiRank+1))/mpiWorldSize - 1.0;
-  brick.bounds = box3f(vec3f(x0, -1.f, -1.f), vec3f(x1, 1.f, 1.f));
+  //brick.bounds.push_back(box3f(vec3f(x0, -1.f, -1.f), vec3f(x1, 1.f, 1.f)));
+  brick.bounds = myregions;
+
   worldBounds = box3f(vec3f(-1.f), vec3f(1.f));
-  std::cerr << mpiRank << " BBOUNDS = " << brick.bounds << std::endl;
+  //std::cerr << mpiRank << " BBOUNDS = " << brick.bounds << std::endl;
 
   brick.model = cpp::VolumetricModel(brick.brick);
   cpp::TransferFunction tfn("piecewiseLinear");
   std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
-  std::vector<float> opacities = {0.05f, 1.0f};
+  std::vector<float> opacities = {0.0f, 1.0f};
   tfn.setParam("color", cpp::CopiedData(colors));
   tfn.setParam("opacity", cpp::CopiedData(opacities));
   vec2f valueRange = vec2f(0, 10.0);
   tfn.setParam("valueRange", valueRange);
   tfn.commit();
   brick.model.setParam("transferFunction", tfn);
-  brick.model.setParam("samplingRate", std::atof(getenv("SAMPLERATE")));
+  brick.model.setParam("samplingRate", 0.01f);
   brick.model.commit();
 
   brick.group = cpp::Group();

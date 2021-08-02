@@ -16,10 +16,14 @@ void makeAMR(const std::vector<float> &in,
     const int blockSize,
     const int refinementLevel,
     const float threshold,
+    const int rank,
+    const int numranks,
     std::vector<box3i> &blockBounds,
     std::vector<int> &refinementLevels,
     std::vector<float> &cellWidths,
-    std::vector<std::vector<float>> &brickData)
+    std::vector<std::vector<float>> &brickData,
+    std::vector<int> &owners,
+    std::vector<vec3i> &levelDims)
 {
   int minWidth = blockSize;
 
@@ -50,6 +54,7 @@ void makeAMR(const std::vector<float> &in,
   // create and write the bricks
   vec3i levelSize = finestLevelSize;
   for (int level = numLevels - 1; level >= 0; --level) {
+    levelDims.push_back(levelSize);
     const vec3i nextLevelSize = levelSize / refinementLevel;
     // create container for next level down
     std::vector<float> nextLevel =
@@ -57,6 +62,7 @@ void makeAMR(const std::vector<float> &in,
 
     const vec3i numBricks = levelSize / blockSize;
     rkcommon::tasking::parallel_for(numBricks.product(), [&](int brickIdx) {
+      bool mine = (brickIdx%numranks == rank);
       // dt == cellWidth in osp_amr_brick_info
       float dt = 1.f / powf(refinementLevel, level);
       // get 3D brick index from flat brickIdx
@@ -85,7 +91,11 @@ void makeAMR(const std::vector<float> &in,
             // get the actual data at current coordinates
             const float v = currentLevel[thisLevelCoord];
             // insert the data into the current brick
-            data[out++] = v;
+            //todo:
+            //  seting remote values to zero here is a trick to workaround (probable) lack of ownership information in VKL
+            //  that relies on the transfer function being transparent at value 0. It mimics having no data at all in the block
+            //  as would be the case in an actual DMP parallel run.
+            data[out++] = (mine?v:0.0);
             nextLevel[nextLevelCoord] +=
                 v / (refinementLevel * refinementLevel * refinementLevel);
             // extend the value range of this brick (min/max) as needed
@@ -103,6 +113,7 @@ void makeAMR(const std::vector<float> &in,
         cellWidths.resize(std::max(cellWidths.size(), (size_t)level + 1));
         cellWidths[level] = dt;
         brickData.push_back(data);
+        owners.push_back(brickIdx%numranks);
         numWritten++;
       }
     }); // end parallel for

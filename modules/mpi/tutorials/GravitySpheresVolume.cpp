@@ -8,6 +8,7 @@
 #include <vector>
 // raw_to_amr
 #include "rawToAMR.h"
+#include "wombat.h"
 
 #include "GravitySpheresVolume.h"
 
@@ -17,8 +18,8 @@ using namespace rkcommon::math;
 
 // Inlined definitions ////////////////////////////////////////////////////
 
-GravitySpheres::GravitySpheres(bool asAMR)
-    : createAsAMR(asAMR)
+GravitySpheres::GravitySpheres(bool asAMR, int rank, int numranks)
+    : createAsAMR(asAMR), rank(rank), numranks(numranks)
 {
   auto voxels = generateVoxels();
   auto voxelRange = vec2f(0.f, 10.f); //10 is from default numPoints of 10
@@ -101,7 +102,7 @@ cpp::Volume GravitySpheres::createStructuredVolume(
   return volume;
 }
 
-cpp::Volume GravitySpheres::createAMRVolume(const VoxelArray &voxels) const
+cpp::Volume GravitySpheres::createAMRVolume(const VoxelArray &voxels)
 {
   const int numLevels = 2;
   const int blockSize = 16;
@@ -113,6 +114,8 @@ cpp::Volume GravitySpheres::createAMRVolume(const VoxelArray &voxels) const
   std::vector<float> cellWidths;
   std::vector<std::vector<float>> blockDataVectors;
   std::vector<cpp::CopiedData> blockData;
+  std::vector<int> owners;
+  std::vector<vec3i> levelDims;
 
   // convert the structured volume to AMR
   makeAMR(voxels,
@@ -121,10 +124,72 @@ cpp::Volume GravitySpheres::createAMRVolume(const VoxelArray &voxels) const
       blockSize,
       refinementLevel,
       threshold,
+      rank, //added to put more metadata in
+      numranks, //added to put more metadata in
       blockBounds,
       refinementLevels,
       cellWidths,
-      blockDataVectors);
+      blockDataVectors,
+      owners, //added to get more metadata out
+      levelDims //added to get more metadata out
+  );
+
+  //prep input to wombat, sadly just a reformatting of the existing AMR metadata
+  std::vector<wombat::Level> levels;
+  for (int i = 0; i < numLevels; ++i)
+  {
+     wombat::Level l;
+     l.refinement[0] = refinementLevel;
+     l.refinement[1] = refinementLevel;
+     l.refinement[2] = refinementLevel;
+     levels.push_back(l);
+  }
+  std::vector<wombat::Box> boxes;
+  for (int i = 0; i < blockBounds.size(); ++i)
+  {
+    wombat::Box b;
+    b.owningrank = owners[i]; //todo: = index in level % nummpiranks
+    b.level = refinementLevels[i];
+    b.origin[0] = blockBounds[i].lower.x;
+    b.origin[1] = blockBounds[i].lower.y;
+    b.origin[2] = blockBounds[i].lower.z;
+    b.dims[0] = blockBounds[i].upper.x-blockBounds[i].lower.x;
+    b.dims[1] = blockBounds[i].upper.y-blockBounds[i].lower.y;
+    b.dims[2] = blockBounds[i].upper.z-blockBounds[i].lower.z;
+    boxes.push_back(b);
+  }
+  std::vector<wombat::Box> sboxes;
+
+  //run wombat to derive a set of convex regions
+  wombat::convexify(levels, boxes, sboxes);
+
+  //from that run, extract regions owned by this rank
+  std::reverse(levelDims.begin(), levelDims.end());
+#if 0
+  for (int x = 0; x < levelDims.size(); x++)
+  {
+     std::cerr << "L " << x << " " << levelDims[x] << std::endl;
+  }
+  std::cerr << "IN" << std::endl;
+  for (int i = 0; i < boxes.size(); ++i)
+  {
+    wombat::Box b = boxes[i];
+    std::cerr << i << " L" << b.level << " R" << b.owningrank << " D" << b.dims[0] << "," << b.dims[1] << "," << b.dims[2] << std::endl;
+  }
+  std::cerr << "OUT" << std::endl;
+#endif
+  for (int i = 0; i < sboxes.size(); ++i)
+  {
+    wombat::Box b = sboxes[i];
+    if (b.owningrank == rank)
+    {
+      vec3i bs = b.origin;
+      vec3i be = b.dims;
+      vec3f bx0 = vec3f{-1.f} + vec3f{2.f}/levelDims[b.level]*bs;
+      vec3f bx1 = bx0 + vec3f{2.f}/levelDims[b.level]*be;
+      myregions.push_back(box3f(vec3f(bx0.x,bx0.y,bx0.z),vec3f(bx1.x,bx1.y,bx1.z)));
+    }
+  }
 
   for (const std::vector<float> &bd : blockDataVectors)
     blockData.emplace_back(bd.data(), OSP_FLOAT, bd.size());
@@ -144,4 +209,9 @@ cpp::Volume GravitySpheres::createAMRVolume(const VoxelArray &voxels) const
   volume.commit();
 
   return volume;
+}
+
+void GravitySpheres::getRegions(std::vector<box3f> &regions)
+{
+  regions = myregions;
 }
