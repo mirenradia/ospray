@@ -27,4 +27,10 @@ typedef struct Box {
 //false on failure. Overwrites convexBoxes, does not modify levels or inBoxes.
 bool convexify(const std::vector<Level> levels, const std::vector<Box> inBoxes, std::vector<Box> &convexBoxes);
 
+//Discover parent child relationships between boxes in adjacent levels.
+//The inBoxes array is sorted amongst levels, ids are taken as index within
+//each level. Boxes in each refined level are flagged as children of boxes
+//within parent level if they fit within it.
+void geneology(const std::vector<Level> levels, std::vector<Box> &inBoxes, int rank);
+
 }

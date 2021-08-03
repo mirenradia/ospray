@@ -247,7 +247,7 @@ VolumeBrick makeLocalVolume(const int mpiRank, const int mpiWorldSize)
   brick.model = cpp::VolumetricModel(brick.brick);
   cpp::TransferFunction tfn("piecewiseLinear");
   std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
-  std::vector<float> opacities = {0.0f, 1.0f};
+  std::vector<float> opacities = {0.0f, 0.0f, 1.0f};
   tfn.setParam("color", cpp::CopiedData(colors));
   tfn.setParam("opacity", cpp::CopiedData(opacities));
   vec2f valueRange = vec2f(0, 10.0);

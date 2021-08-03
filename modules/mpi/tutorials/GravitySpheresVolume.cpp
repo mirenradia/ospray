@@ -161,7 +161,12 @@ cpp::Volume GravitySpheres::createAMRVolume(const VoxelArray &voxels)
   std::vector<wombat::Box> sboxes;
 
   //run wombat to derive a set of convex regions
+  //std::cerr << rank << " geneology [" << std::endl;
+  wombat::geneology(levels, boxes, rank);
+  //std::cerr << rank << " ] geneology "<< std::endl;
+  //std::cerr << rank << " convexify ["<< std::endl;
   wombat::convexify(levels, boxes, sboxes);
+  //std::cerr << rank << " ] convexify "<< std::endl;
 
   //from that run, extract regions owned by this rank
   std::reverse(levelDims.begin(), levelDims.end());
