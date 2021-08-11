@@ -86,7 +86,10 @@ add_library(mpi_tutorial_common STATIC
 #Chombo HDF5 Reader
 set(HDF5_PREFER_PARALLEL TRUE)
 include(FindHDF5)
-set(CHOMBO_HDF5_READER_LIBS ${HDF5_LIBRARIES})
+set(CHOMBO_HDF5_READER_LIBS ${HDF5_LIBRARIES} 
+  rkcommon::rkcommon
+  ospray
+)
 set(CHOMBO_HDF5_READER_INCLUDE_DIRS ${HDF5_INCLUDE_DIRS})
 if (HDF5_IS_PARALLEL)
   message(STATUS "HDF5 supports Parallel IO")

@@ -59,7 +59,12 @@ int main(int argc, char **argv)
   MPI_Comm_rank(MPI_COMM_WORLD, &mpiRank);
   MPI_Comm_size(MPI_COMM_WORLD, &mpiWorldSize);
 
-  print_hdf5_lib_version();
+  ChomboHDF5::Handle handle;
+  handle.open("test.hdf5");
+  std::cout << "Is test.hdf5 file open? ";
+  std::cout << ((handle.isOpen()) ? "yes" : "no");
+  std::cout << std::endl;
+  handle.close();
   return 0;
 
   std::cout << "OSPRay rank " << mpiRank << "/" << mpiWorldSize << "\n";
