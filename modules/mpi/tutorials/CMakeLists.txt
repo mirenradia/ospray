@@ -10,6 +10,19 @@ macro(ospray_create_mpi_tutorial tutorial_name)
   )
 endmacro()
 
+macro(ospray_create_mpi_hdf5_tutorial tutorial_name)
+  add_executable(${tutorial_name} ${OSPRAY_RESOURCE} ${ARGN})
+  target_link_libraries(${tutorial_name} PRIVATE
+    mpi_tutorial_common
+    chombo_hdf5_reader
+  )
+  install(TARGETS ${tutorial_name}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT mpi
+  )
+endmacro()
+
+
 find_package(MPI REQUIRED)
 
 # prefer libGL over libOpenGl for better compatibility with SWR
@@ -70,6 +83,22 @@ add_library(mpi_tutorial_common STATIC
   ${CMAKE_SOURCE_DIR}/apps/ospExamples/imgui_impl_glfw_gl3.cpp
 )
 
+#Chombo HDF5 Reader
+set(HDF5_PREFER_PARALLEL TRUE)
+include(FindHDF5)
+set(CHOMBO_HDF5_READER_LIBS ${HDF5_LIBRARIES})
+set(CHOMBO_HDF5_READER_INCLUDE_DIRS ${HDF5_INCLUDE_DIRS})
+if (HDF5_IS_PARALLEL)
+  message(STATUS "HDF5 supports Parallel IO")
+  list(APPEND CHOMBO_HDF5_READER_LIBS MPI::MPI_CXX)
+  list(APPEND CHOMBO_HDF5_READER_INCLUDE_DIRS ${MPI_C_INCLUDE_PATH})
+endif()
+add_library(chombo_hdf5_reader STATIC ChomboHDF5Reader.cpp)
+target_link_libraries(chombo_hdf5_reader PUBLIC ${CHOMBO_HDF5_READER_LIBS})
+target_include_directories(chombo_hdf5_reader PUBLIC
+  ${CHOMBO_HDF5_READER_INCLUDE_DIRS}
+)
+
 target_include_directories(mpi_tutorial_common PRIVATE
   ${CMAKE_SOURCE_DIR}/apps/ospExamples/)
 
@@ -101,6 +130,14 @@ ospray_create_mpi_tutorial(ospMPIDistribTutorialVolume
 
 ospray_sign_target(ospMPIDistribTutorialVolume)
 
+ospray_create_mpi_hdf5_tutorial(ospMPIDistribTutorialVolumeHDF5
+  wombat.cxx
+  rawToAMR.cpp
+  ospMPIDistribTutorialVolumeHDF5.cpp
+)
+
+ospray_sign_target(ospMPIDistribTutorialVolumeHDF5)
+
 ospray_create_mpi_tutorial(ospMPIDistribTutorialPartialRepl
   ospMPIDistribTutorialPartialRepl.cpp
 )
@@ -115,4 +152,3 @@ ospray_sign_target(ospMPIDistribTutorialReplicated)
 target_link_libraries(ospMPIDistribTutorialReplicated PUBLIC
   ospray_testing
 )
-
