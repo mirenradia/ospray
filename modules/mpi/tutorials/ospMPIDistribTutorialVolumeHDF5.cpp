@@ -64,6 +64,11 @@ int main(int argc, char **argv)
   std::cout << "Is test.hdf5 file open? ";
   std::cout << ((handle.isOpen()) ? "yes" : "no");
   std::cout << std::endl;
+
+  handle.setGroup("Chombo_global");
+  ChomboHDF5::HeaderData header_data;
+  header_data.readFromFile(handle);
+  std::cout << "SpaceDim read = " << header_data.m_int["SpaceDim"] << std::endl;
   handle.close();
   return 0;
 
