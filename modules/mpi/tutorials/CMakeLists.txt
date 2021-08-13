@@ -86,20 +86,18 @@ add_library(mpi_tutorial_common STATIC
 #Chombo HDF5 Reader
 set(HDF5_PREFER_PARALLEL TRUE)
 include(FindHDF5)
-set(CHOMBO_HDF5_READER_LIBS ${HDF5_LIBRARIES} 
-  rkcommon::rkcommon
-  ospray
-)
-set(CHOMBO_HDF5_READER_INCLUDE_DIRS ${HDF5_INCLUDE_DIRS})
-if (HDF5_IS_PARALLEL)
-  message(STATUS "HDF5 supports Parallel IO")
-  list(APPEND CHOMBO_HDF5_READER_LIBS MPI::MPI_CXX)
-  list(APPEND CHOMBO_HDF5_READER_INCLUDE_DIRS ${MPI_C_INCLUDE_PATH})
+if (NOT HDF5_IS_PARALLEL)
+  message(WARNING "Found HDF5 library has not been built with MPI")
 endif()
 add_library(chombo_hdf5_reader STATIC ChomboHDF5Reader.cpp)
-target_link_libraries(chombo_hdf5_reader PUBLIC ${CHOMBO_HDF5_READER_LIBS})
+target_link_libraries(chombo_hdf5_reader PUBLIC
+  rkcommon::rkcommon
+  ospray
+  ${HDF5_LIBRARIES}
+)
 target_include_directories(chombo_hdf5_reader PUBLIC
-  ${CHOMBO_HDF5_READER_INCLUDE_DIRS}
+  ${HDF5_INCLUDE_DIRS}
+  ${MPI_C_INCLUDE_PATH}
 )
 
 target_include_directories(mpi_tutorial_common PRIVATE

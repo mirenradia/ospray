@@ -4,6 +4,7 @@
 #include <hdf5.h>
 #include <map>
 #include <string>
+#include <vector>
 #include "ospray/ospray_cpp/ext/rkcommon.h"
 
 namespace ChomboHDF5 {
@@ -34,6 +35,8 @@ class Handle
   // sets the current group to a specified level
   void setGroupToLevel(int a_level);
 
+  const std::string &getFilename() const;
+
   // returns the current group
   const std::string &getGroup() const;
 
@@ -62,7 +65,7 @@ class Handle
   int verifyChomboFile();
 };
 
-// Reads and stores information in the HDF5 Header
+// Reads and stores information in HDF5 headers
 class HeaderData
 {
  public:
@@ -88,6 +91,41 @@ herr_t ChomboHDF5HeaderDataAttributeScan(hid_t a_loc_id,
     const H5A_info_t *a_info,
     void *a_opdata);
 }
+
+// Main class to read data from a HDF5 file into a format that can be
+// used to create an OSPRay AMR volume
+class Reader
+{
+ public:
+  // constructor (opens the file)
+  Reader(const std::string &a_filename);
+
+  // reads metadata such as the components and numLevels from the main header
+  // under "/",
+  void readMainHeader();
+
+  // reads metadata for every level
+  void readLevelHeaders();
+
+  // reads blockBounds for every level
+  int readBlocks();
+
+ private:
+  Handle m_handle; // the file handle
+  int m_numComps; // the number of components in the file (we will only read
+                  // one)
+  std::map<std::string, int> m_compMap; // the names of the components
+  int m_numLevels;
+  bool m_mainHeaderRead = false;
+  std::vector<int>
+      m_refRatios; // the ratio of a level's resolution to the next coarser one
+  std::vector<float> m_cellWidths; // the width of a single cell on each level
+  std::vector<rkcommon::math::box3i>
+      m_blockBounds; // all the blocks on every level
+  std::vector<int> m_blockLevels; // which level each block belongs to
+  std::vector<std::vector<float>>
+      m_blockDataVector; // the flattened data in each box.
+};
 
 } // namespace ChomboHDF5
 #endif

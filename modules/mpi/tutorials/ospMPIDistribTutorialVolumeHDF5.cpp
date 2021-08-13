@@ -59,21 +59,16 @@ int main(int argc, char **argv)
   MPI_Comm_rank(MPI_COMM_WORLD, &mpiRank);
   MPI_Comm_size(MPI_COMM_WORLD, &mpiWorldSize);
 
-  ChomboHDF5::Handle handle;
-  handle.open("test.hdf5");
-  std::cout << "Is test.hdf5 file open? ";
-  std::cout << ((handle.isOpen()) ? "yes" : "no");
-  std::cout << std::endl;
-
-  handle.setGroup("Chombo_global");
-  ChomboHDF5::HeaderData header_data;
-  header_data.readFromFile(handle);
-  std::cout << "SpaceDim read = " << header_data.m_int["SpaceDim"] << std::endl;
-  handle.close();
-  return 0;
+  {
+    ChomboHDF5::Reader hdf5Reader("test.hdf5");
+    hdf5Reader.readMainHeader();
+    hdf5Reader.readLevelHeaders();
+    hdf5Reader.readBlocks();
+  }
 
   std::cout << "OSPRay rank " << mpiRank << "/" << mpiWorldSize << "\n";
 
+  /*
   // load the MPI module, and select the MPI distributed device. Here we
   // do not call ospInit, as we want to explicitly pick the distributed
   // device. This can also be done by passing --osp:mpi-distributed when
@@ -144,7 +139,7 @@ int main(int argc, char **argv)
   }
   // cleanly shut OSPRay down
   ospShutdown();
-
+  */
   MPI_Finalize();
 
   return 0;

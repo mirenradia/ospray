@@ -4,6 +4,8 @@
 
 namespace ChomboHDF5 {
 
+// Handle //////////////////////////////////////////////////////////////////////
+
 bool Handle::s_initialized = false;
 hid_t Handle::box3i_id = 0;
 hid_t Handle::vec3i_id = 0;
@@ -182,6 +184,11 @@ void Handle::setGroupToLevel(int a_level)
   setGroup(level_str);
 }
 
+const std::string &Handle::getFilename() const
+{
+  return m_filename;
+}
+
 const std::string &Handle::getGroup() const
 {
   return m_group;
@@ -196,6 +203,8 @@ const hid_t &Handle::groupID() const
 {
   return m_currentGroupID;
 }
+
+// HeaderData //////////////////////////////////////////////////////////////////
 
 int HeaderData::readFromFile(Handle &a_handle)
 {
@@ -297,4 +306,150 @@ herr_t ChomboHDF5HeaderDataAttributeScan(hid_t a_loc_id,
   return ret;
 }
 }
+
+// Reader //////////////////////////////////////////////////////////////////////
+
+Reader::Reader(const std::string &a_filename)
+{
+  m_handle.open(a_filename);
+}
+
+void Reader::readMainHeader()
+{
+  m_handle.setGroup("/");
+  HeaderData mainHeader;
+  mainHeader.readFromFile(m_handle);
+
+  if (mainHeader.m_int.find("num_levels") == mainHeader.m_int.end()) {
+    throw std::runtime_error(
+        "File: " + m_handle.getFilename() + " does not contain num_levels.");
+  }
+  m_numLevels = mainHeader.m_int["num_levels"];
+  std::cout << "num_levels = " << m_numLevels << std::endl;
+
+  if (mainHeader.m_int.find("num_components") == mainHeader.m_int.end()) {
+    throw std::runtime_error("File: " + m_handle.getFilename()
+        + " does not contain num_components.");
+  }
+  m_numComps = mainHeader.m_int["num_components"];
+  std::cout << "num_components = " << m_numComps << std::endl;
+
+  std::string compName;
+  char compStr[60];
+  for (int icomp = 0; icomp < m_numComps; ++icomp) {
+    sprintf(compStr, "component_%d", icomp);
+    if (mainHeader.m_string.find(compStr) == mainHeader.m_string.end()) {
+      throw std::runtime_error("File: " + m_handle.getFilename()
+          + " does not have enough component names.");
+    }
+    compName = mainHeader.m_string[compStr];
+    std::cout << "component " << icomp << " = " << compName << std::endl;
+    m_compMap[compName] = icomp;
+  }
+
+  m_mainHeaderRead = true;
+}
+
+void Reader::readLevelHeaders()
+{
+  if (!m_mainHeaderRead) {
+    readMainHeader();
+  }
+
+  // the first element of refRatio is irrelevant but is defined nevertheless
+  m_refRatios.resize(m_numLevels);
+  m_cellWidths.resize(m_numLevels);
+
+  for (int ilev = 0; ilev < m_numLevels; ++ilev) {
+    m_handle.setGroupToLevel(ilev);
+
+    HeaderData levelHeader;
+    levelHeader.readFromFile(m_handle);
+    if (levelHeader.m_int.find("ref_ratio") == levelHeader.m_int.end()) {
+      throw std::runtime_error(
+          "File: " + m_handle.getFilename() + " does not contain ref_ratio"
+          " at level " + std::to_string(ilev) + ".");
+    }
+    m_refRatios[ilev] = levelHeader.m_int["ref_ratio"];
+
+    if (levelHeader.m_double.find("dx") == levelHeader.m_double.end()) {
+      throw std::runtime_error("File: " + m_handle.getFilename()
+          + " does not contain dx at level" + std::to_string(ilev) + ".");
+    }
+    m_cellWidths[ilev] = levelHeader.m_int["dx"];
+  }
+}
+
+int Reader::readBlocks()
+{
+  if (!m_mainHeaderRead) {
+    readMainHeader();
+  }
+
+  m_blockBounds.clear();
+  m_blockLevels.clear();
+
+  int totalNumBlocks = 0;
+  for (int ilev = 0; ilev < m_numLevels; ++ilev) {
+    m_handle.setGroupToLevel(ilev);
+
+    // get identifier to blocks dataset on this level
+    hid_t blocksDataset_id = H5Dopen2(m_handle.groupID(), "boxes", H5P_DEFAULT);
+    if (blocksDataset_id < 0)
+      return blocksDataset_id;
+
+    // make a copy of blocks' dataspace
+    hid_t blockDataspace = H5Dget_space(blocksDataset_id);
+    if (blockDataspace < 0)
+      return blockDataspace;
+
+    // calculate size of required memory
+    hsize_t dims[1], maxDims[1];
+    H5Sget_simple_extent_dims(blockDataspace, dims, maxDims);
+    totalNumBlocks += dims[0];
+    m_blockLevels.resize(totalNumBlocks, ilev);
+    m_blockBounds.reserve(totalNumBlocks);
+
+    // create HDF5 dataspace
+    hid_t memDataspace = H5Screate_simple(1, dims, NULL);
+
+    // allocate dynamic memory for HDF5 read function
+    box3i *rawBlocks = new box3i[dims[0]];
+    if (rawBlocks == nullptr) {
+      throw std::runtime_error(
+          "Failed to allocate memory in ChomboHDF5::Reader::readBlocks.");
+    }
+
+    // now read in the blocks
+    herr_t error = H5Dread(blocksDataset_id,
+        m_handle.box3i_id,
+        memDataspace,
+        blockDataspace,
+        H5P_DEFAULT,
+        rawBlocks);
+    if (error < 0)
+      return error;
+
+    for (unsigned ibox = 0; ibox < dims[0]; ++ibox) {
+      m_blockBounds.push_back(rawBlocks[ibox]);
+    }
+
+    delete[] rawBlocks;
+    H5Dclose(blocksDataset_id);
+    H5Sclose(blockDataspace);
+    H5Sclose(memDataspace);
+  }
+  /*
+  for (int i = 0; i < totalNumBlocks; ++i) {
+    box3i &block = m_blockBounds[i];
+    std::cout << "Block: Lower = (" << block.lower.x << ", " << block.lower.y
+              << ", " << block.lower.z << "), Upper = (" << block.upper.x
+              << ", " << block.upper.y << ", " << block.upper.z << ") on level "
+              << m_blockLevels[i] << "\n";
+  }
+  std::cout << std::flush;
+  */
+  return 0;
+}
+
 } // namespace ChomboHDF5
