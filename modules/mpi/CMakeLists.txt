@@ -25,6 +25,14 @@ cmake_dependent_option(
   OFF
 )
 
+cmake_dependent_option(
+  OSPRAY_MPI_USE_HDF5
+  "Enable linking with HDF5 library"
+  ON
+  OSPRAY_MPI_BUILD_TUTORIALS
+  OFF
+)
+
 if (NOT OSPRAY_MODULE_MPI)
   return()
 endif()
@@ -48,4 +56,3 @@ add_subdirectory(ospray)
 if (OSPRAY_MPI_BUILD_TUTORIALS)
   add_subdirectory(tutorials)
 endif()
-

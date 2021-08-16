@@ -10,17 +10,19 @@ macro(ospray_create_mpi_tutorial tutorial_name)
   )
 endmacro()
 
-macro(ospray_create_mpi_hdf5_tutorial tutorial_name)
-  add_executable(${tutorial_name} ${OSPRAY_RESOURCE} ${ARGN})
-  target_link_libraries(${tutorial_name} PRIVATE
-    mpi_tutorial_common
-    chombo_hdf5_reader
-  )
-  install(TARGETS ${tutorial_name}
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT mpi
-  )
-endmacro()
+if (OSPRAY_MPI_USE_HDF5)
+  macro(ospray_create_mpi_hdf5_tutorial tutorial_name)
+    add_executable(${tutorial_name} ${OSPRAY_RESOURCE} ${ARGN})
+    target_link_libraries(${tutorial_name} PRIVATE
+      mpi_tutorial_common
+      chombo_hdf5_reader
+    )
+    install(TARGETS ${tutorial_name}
+      DESTINATION ${CMAKE_INSTALL_BINDIR}
+      COMPONENT mpi
+    )
+  endmacro()
+endif()
 
 
 find_package(MPI REQUIRED)
@@ -83,22 +85,24 @@ add_library(mpi_tutorial_common STATIC
   ${CMAKE_SOURCE_DIR}/apps/ospExamples/imgui_impl_glfw_gl3.cpp
 )
 
-#Chombo HDF5 Reader
-set(HDF5_PREFER_PARALLEL TRUE)
-include(FindHDF5)
-if (NOT HDF5_IS_PARALLEL)
-  message(WARNING "Found HDF5 library has not been built with MPI")
+if (OSPRAY_MPI_USE_HDF5)
+  #Chombo HDF5 Reader
+  set(HDF5_PREFER_PARALLEL TRUE)
+  include(FindHDF5)
+  if (NOT HDF5_IS_PARALLEL)
+    message(WARNING "Found HDF5 library has not been built with MPI")
+  endif()
+  add_library(chombo_hdf5_reader STATIC ChomboHDF5Reader.cpp)
+  target_link_libraries(chombo_hdf5_reader PUBLIC
+    rkcommon::rkcommon
+    ospray
+    ${HDF5_LIBRARIES}
+  )
+  target_include_directories(chombo_hdf5_reader PUBLIC
+    ${HDF5_INCLUDE_DIRS}
+    ${MPI_C_INCLUDE_PATH}
+  )
 endif()
-add_library(chombo_hdf5_reader STATIC ChomboHDF5Reader.cpp)
-target_link_libraries(chombo_hdf5_reader PUBLIC
-  rkcommon::rkcommon
-  ospray
-  ${HDF5_LIBRARIES}
-)
-target_include_directories(chombo_hdf5_reader PUBLIC
-  ${HDF5_INCLUDE_DIRS}
-  ${MPI_C_INCLUDE_PATH}
-)
 
 target_include_directories(mpi_tutorial_common PRIVATE
   ${CMAKE_SOURCE_DIR}/apps/ospExamples/)
@@ -131,13 +135,16 @@ ospray_create_mpi_tutorial(ospMPIDistribTutorialVolume
 
 ospray_sign_target(ospMPIDistribTutorialVolume)
 
-ospray_create_mpi_hdf5_tutorial(ospMPIDistribTutorialVolumeHDF5
-  wombat.cxx
-  rawToAMR.cpp
-  ospMPIDistribTutorialVolumeHDF5.cpp
-)
+if (OSPRAY_MPI_USE_HDF5)
+  ospray_create_mpi_hdf5_tutorial(ospMPIDistribTutorialVolumeHDF5
+    wombat.cxx
+    rawToAMR.cpp
+    ospMPIDistribTutorialVolumeHDF5.cpp
+  )
 
-ospray_sign_target(ospMPIDistribTutorialVolumeHDF5)
+  ospray_sign_target(ospMPIDistribTutorialVolumeHDF5)
+endif()
+
 
 ospray_create_mpi_tutorial(ospMPIDistribTutorialPartialRepl
   ospMPIDistribTutorialPartialRepl.cpp
