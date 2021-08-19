@@ -85,25 +85,6 @@ add_library(mpi_tutorial_common STATIC
   ${CMAKE_SOURCE_DIR}/apps/ospExamples/imgui_impl_glfw_gl3.cpp
 )
 
-if (OSPRAY_MPI_USE_HDF5)
-  #Chombo HDF5 Reader
-  set(HDF5_PREFER_PARALLEL TRUE)
-  include(FindHDF5)
-  if (NOT HDF5_IS_PARALLEL)
-    message(WARNING "Found HDF5 library has not been built with MPI")
-  endif()
-  add_library(chombo_hdf5_reader STATIC ChomboHDF5Reader.cpp)
-  target_link_libraries(chombo_hdf5_reader PUBLIC
-    rkcommon::rkcommon
-    ospray
-    ${HDF5_LIBRARIES}
-  )
-  target_include_directories(chombo_hdf5_reader PUBLIC
-    ${HDF5_INCLUDE_DIRS}
-    ${MPI_C_INCLUDE_PATH}
-  )
-endif()
-
 target_include_directories(mpi_tutorial_common PRIVATE
   ${CMAKE_SOURCE_DIR}/apps/ospExamples/)
 
