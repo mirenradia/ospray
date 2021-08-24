@@ -309,7 +309,8 @@ herr_t ChomboHDF5HeaderDataAttributeScan(hid_t a_loc_id,
 
 // Reader //////////////////////////////////////////////////////////////////////
 
-Reader::Reader(const std::string &a_filename)
+Reader::Reader(const std::string &a_filename, int a_mpiRank)
+    : m_mpiRank(a_mpiRank)
 {
   m_handle.open(a_filename);
 }
@@ -388,8 +389,8 @@ int Reader::readBlocks()
 
   m_blockBounds.clear();
   m_blockLevels.clear();
+  m_numBlocksPerLevel.resize(m_numLevels);
 
-  int totalNumBlocks = 0;
   for (int ilev = 0; ilev < m_numLevels; ++ilev) {
     m_handle.setGroupToLevel(ilev);
 
@@ -406,9 +407,10 @@ int Reader::readBlocks()
     // calculate size of required memory
     hsize_t dims[1], maxDims[1];
     H5Sget_simple_extent_dims(blockDataspace, dims, maxDims);
-    totalNumBlocks += dims[0];
-    m_blockLevels.resize(totalNumBlocks, ilev);
-    m_blockBounds.reserve(totalNumBlocks);
+    m_totalNumBlocks += dims[0];
+    m_numBlocksPerLevel[ilev] = dims[0];
+    m_blockLevels.resize(m_totalNumBlocks, ilev);
+    m_blockBounds.reserve(m_totalNumBlocks);
 
     // create HDF5 dataspace
     hid_t memDataspace = H5Screate_simple(1, dims, NULL);
@@ -449,7 +451,154 @@ int Reader::readBlocks()
   }
   std::cout << std::flush;
   */
+  m_blocksRead = true;
   return 0;
+}
+
+void Reader::setRankDataOwner()
+{
+  if (!m_blocksRead)
+    readBlocks();
+
+  m_rankDataOwner.resize(m_totalNumBlocks);
+  int numMpiRanks;
+  MPI_Comm_size(MPI_COMM_WORLD, &numMpiRanks);
+  for (int iblock = 0; iblock < m_totalNumBlocks; ++iblock) {
+    // distribute blocks in a round robin fashion
+    m_rankDataOwner[iblock] = iblock % numMpiRanks;
+  }
+}
+
+int Reader::readBlockData(const std::string &a_compName)
+{
+  if (!m_blocksRead)
+    readBlocks();
+
+  if (m_compMap.find(a_compName) == m_compMap.end()) {
+    throw std::runtime_error(
+        a_compName + " not found in " + m_handle.getFilename());
+  }
+  int comp = m_compMap[a_compName];
+
+  setRankDataOwner();
+
+  m_blockDataVector.resize(m_totalNumBlocks);
+  for (int ilev = 0; ilev < m_numLevels; ++ilev) {
+    m_handle.setGroupToLevel(ilev);
+
+    // check there are no ghosts and the number of components is the same as
+    // in the main header
+    HeaderData levelDataHeader;
+    int err = m_handle.setGroup(m_handle.getGroup() + "/data_attributes");
+    if (err != 0) {
+      throw std::runtime_error("Error opening " + m_handle.getGroup()
+          + "/data_attributes in " + m_handle.getFilename());
+    }
+    levelDataHeader.readFromFile(m_handle);
+    int numComps = levelDataHeader.m_int["comps"];
+    vec3i ghostVec = levelDataHeader.m_vec3i["ghost"];
+    if (numComps != m_numComps) {
+      std::cerr << "Number of components on level " << ilev
+                << " differs to number in main header";
+    }
+    if (comp > numComps) {
+      throw std::runtime_error(a_compName + " does not exist on level "
+          + std::to_string(ilev) + " in " + m_handle.getFilename());
+    }
+    if (ghostVec.sum() != 0) {
+      throw std::runtime_error("Data on level " + std::to_string(ilev) + " in "
+          + m_handle.getFilename()
+          + " contains ghosts which this reader does not support.");
+    }
+
+    m_handle.setGroupToLevel(ilev);
+    // Chombo allows for multiple types but we assume there is only one type
+    // of data like VisIt
+    hid_t level_dataset_id =
+        H5Dopen2(m_handle.groupID(), "data:datatype=0", H5P_DEFAULT);
+    if (level_dataset_id < 0) {
+      throw std::runtime_error("Error opening dataset on level "
+          + std::to_string(ilev) + " in " + m_handle.getFilename());
+    }
+    hid_t level_dataspace_id = H5Dget_space(level_dataset_id);
+    if (level_dataspace_id < 0) {
+      throw std::runtime_error("Error opening dataspace on level "
+          + std::to_string(ilev) + " in " + m_handle.getFilename());
+    }
+
+    for (int iblock = 0; iblock < m_numBlocksPerLevel[ilev]; ++iblock) {
+      if (m_mpiRank == m_rankDataOwner[iblock]) {
+        err = readSingleBlockData(
+            iblock, ilev, comp, level_dataset_id, level_dataspace_id);
+        if (err < 0) {
+          H5Sclose(level_dataspace_id);
+          H5Dclose(level_dataset_id);
+          return err;
+        }
+
+      } else {
+        // could fill data not owned by this rank by zero (as will be required
+        // for OSPRay Volumes) or leave it to later
+      }
+    }
+
+    H5Sclose(level_dataspace_id);
+    H5Dclose(level_dataset_id);
+  }
+  return 0;
+}
+
+int Reader::readSingleBlockData(int a_levelBlockIdx,
+    int a_level,
+    int a_comp,
+    hid_t a_level_dataset_id,
+    hid_t a_level_dataspace_id)
+{
+  if (a_levelBlockIdx >= m_numBlocksPerLevel[a_level]) {
+    throw std::runtime_error("Error reading " + m_handle.getFilename()
+        + ": Requested read of non-existent block");
+  }
+
+  int thisLevelFirstBlockIdx = 0;
+  for (int ilev = 0; ilev < a_level; ++ilev) {
+    thisLevelFirstBlockIdx += m_numBlocksPerLevel[ilev];
+  }
+  int globalBlockIdx = thisLevelFirstBlockIdx + a_levelBlockIdx;
+
+  // Calculate offset into this level's flattened array.
+  hsize_t offset = 0;
+  for (int iblock = thisLevelFirstBlockIdx; iblock < globalBlockIdx; iblock++) {
+    // assume there are no ghosts in the file
+    box3i &block = m_blockBounds[iblock];
+    hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x)
+        * (block.upper.y - block.lower.y) * (block.upper.z - block.lower.z));
+    offset += numCells * m_numComps;
+  }
+  box3i &block = m_blockBounds[globalBlockIdx];
+  hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x)
+      * (block.upper.y - block.lower.y) * (block.upper.z - block.lower.z));
+  offset += numCells * a_comp;
+
+  // select data to read
+  int err = H5Sselect_hyperslab(
+      a_level_dataspace_id, H5S_SELECT_SET, &offset, NULL, &numCells, NULL);
+  if (err < 0)
+    return err;
+  hid_t memDataspace = H5Screate_simple(1, &numCells, NULL);
+  if (memDataspace < 0)
+    return memDataspace;
+
+  // read the data
+  std::vector<float> &blockData = m_blockDataVector.at(globalBlockIdx);
+  blockData.resize(numCells);
+  err = H5Dread(a_level_dataset_id,
+      H5T_NATIVE_FLOAT,
+      memDataspace,
+      a_level_dataspace_id,
+      H5P_DEFAULT,
+      blockData.data());
+  H5Sclose(memDataspace);
+  return err;
 }
 
 } // namespace ChomboHDF5

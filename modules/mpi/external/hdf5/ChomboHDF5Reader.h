@@ -98,7 +98,7 @@ class Reader
 {
  public:
   // constructor (opens the file)
-  Reader(const std::string &a_filename);
+  Reader(const std::string &a_filename, int a_mpiRank);
 
   // reads metadata such as the components and numLevels from the main header
   // under "/",
@@ -110,21 +110,39 @@ class Reader
   // reads blockBounds for every level
   int readBlocks();
 
+  // read all block data
+  int readBlockData(const std::string &a_compName);
+
  private:
   Handle m_handle; // the file handle
+  const int m_mpiRank;
   int m_numComps; // the number of components in the file (we will only read
                   // one)
   std::map<std::string, int> m_compMap; // the names of the components
   int m_numLevels;
   bool m_mainHeaderRead = false;
+  bool m_blocksRead = false;
   std::vector<int>
       m_refRatios; // the ratio of a level's resolution to the next coarser one
   std::vector<float> m_cellWidths; // the width of a single cell on each level
   std::vector<rkcommon::math::box3i>
       m_blockBounds; // all the blocks on every level
   std::vector<int> m_blockLevels; // which level each block belongs to
+  std::vector<int> m_numBlocksPerLevel; // number of blocks on each level
+  int m_totalNumBlocks;
+  std::vector<int> m_rankDataOwner; // the MPI rank on which the data for each
+                                    // block will be on
   std::vector<std::vector<float>>
       m_blockDataVector; // the flattened data in each box.
+
+  void setRankDataOwner();
+
+  // reads in the data for a single block on a given level
+  int readSingleBlockData(int a_levelBlockIdx,
+      int a_level,
+      int a_comp,
+      hid_t a_level_dataset_id,
+      hid_t a_level_dataspace_id);
 };
 
 } // namespace ChomboHDF5
