@@ -60,10 +60,11 @@ int main(int argc, char **argv)
   MPI_Comm_size(MPI_COMM_WORLD, &mpiWorldSize);
 
   {
-    ChomboHDF5::Reader hdf5Reader("test.hdf5");
+    ChomboHDF5::Reader hdf5Reader("test.hdf5", mpiRank);
     hdf5Reader.readMainHeader();
     hdf5Reader.readLevelHeaders();
     hdf5Reader.readBlocks();
+    hdf5Reader.readBlockData("chi");
   }
 
   std::cout << "OSPRay rank " << mpiRank << "/" << mpiWorldSize << "\n";

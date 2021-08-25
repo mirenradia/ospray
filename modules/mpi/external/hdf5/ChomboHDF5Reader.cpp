@@ -326,14 +326,14 @@ void Reader::readMainHeader()
         "File: " + m_handle.getFilename() + " does not contain num_levels.");
   }
   m_numLevels = mainHeader.m_int["num_levels"];
-  std::cout << "num_levels = " << m_numLevels << std::endl;
+  // std::cout << "num_levels = " << m_numLevels << std::endl;
 
   if (mainHeader.m_int.find("num_components") == mainHeader.m_int.end()) {
     throw std::runtime_error("File: " + m_handle.getFilename()
         + " does not contain num_components.");
   }
   m_numComps = mainHeader.m_int["num_components"];
-  std::cout << "num_components = " << m_numComps << std::endl;
+  // std::cout << "num_components = " << m_numComps << std::endl;
 
   std::string compName;
   char compStr[60];
@@ -344,7 +344,7 @@ void Reader::readMainHeader()
           + " does not have enough component names.");
     }
     compName = mainHeader.m_string[compStr];
-    std::cout << "component " << icomp << " = " << compName << std::endl;
+    // std::cout << "component " << icomp << " = " << compName << std::endl;
     m_compMap[compName] = icomp;
   }
 
@@ -390,6 +390,7 @@ int Reader::readBlocks()
   m_blockBounds.clear();
   m_blockLevels.clear();
   m_numBlocksPerLevel.resize(m_numLevels);
+  m_totalNumBlocks = 0;
 
   for (int ilev = 0; ilev < m_numLevels; ++ilev) {
     m_handle.setGroupToLevel(ilev);
@@ -496,7 +497,7 @@ int Reader::readBlockData(const std::string &a_compName)
     }
     levelDataHeader.readFromFile(m_handle);
     int numComps = levelDataHeader.m_int["comps"];
-    vec3i ghostVec = levelDataHeader.m_vec3i["ghost"];
+    vec3i ghostVec = levelDataHeader.m_vec3i["outputGhost"];
     if (numComps != m_numComps) {
       std::cerr << "Number of components on level " << ilev
                 << " differs to number in main header";
@@ -570,13 +571,15 @@ int Reader::readSingleBlockData(int a_levelBlockIdx,
   for (int iblock = thisLevelFirstBlockIdx; iblock < globalBlockIdx; iblock++) {
     // assume there are no ghosts in the file
     box3i &block = m_blockBounds[iblock];
-    hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x)
-        * (block.upper.y - block.lower.y) * (block.upper.z - block.lower.z));
+    hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x + 1)
+        * (block.upper.y - block.lower.y + 1)
+        * (block.upper.z - block.lower.z + 1));
     offset += numCells * m_numComps;
   }
   box3i &block = m_blockBounds[globalBlockIdx];
-  hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x)
-      * (block.upper.y - block.lower.y) * (block.upper.z - block.lower.z));
+  hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x + 1)
+      * (block.upper.y - block.lower.y + 1)
+      * (block.upper.z - block.lower.z + 1));
   offset += numCells * a_comp;
 
   // select data to read
@@ -597,6 +600,19 @@ int Reader::readSingleBlockData(int a_levelBlockIdx,
       a_level_dataspace_id,
       H5P_DEFAULT,
       blockData.data());
+  /*
+if ((m_mpiRank == 0) && (a_level == m_numLevels - 1)
+  && (a_levelBlockIdx == 0)) {
+std::cout << "*****************************\n";
+std::cout << "Flattened first box on finest level\n";
+for (float value : blockData) {
+  std::cout << value << "\n";
+}
+std::cout << "numCells = " << numCells << "\n";
+std::cout << "******************************" << std::endl;
+;
+}
+*/
   H5Sclose(memDataspace);
   return err;
 }
