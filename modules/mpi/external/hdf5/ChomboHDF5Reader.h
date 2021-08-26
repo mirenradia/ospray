@@ -5,6 +5,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include "ospray/ospray_cpp.h"
 #include "ospray/ospray_cpp/ext/rkcommon.h"
 
 namespace ChomboHDF5 {
@@ -97,30 +98,26 @@ herr_t ChomboHDF5HeaderDataAttributeScan(hid_t a_loc_id,
 class Reader
 {
  public:
-  // constructor (opens the file)
-  Reader(const std::string &a_filename, int a_mpiRank);
+  // constructor
+  // opens the file, reads it, creates the volume and then closes the file
+  Reader(const std::string &a_filename,
+      int a_mpiRank,
+      int a_mpiWorldSize,
+      const std::string &a_compName);
 
-  // reads metadata such as the components and numLevels from the main header
-  // under "/",
-  void readMainHeader();
-
-  // reads metadata for every level
-  void readLevelHeaders();
-
-  // reads blockBounds for every level
-  int readBlocks();
-
-  // read all block data
-  int readBlockData(const std::string &a_compName);
+  // can pass by value since the Volume object itself does not contain very much
+  ospray::cpp::Volume getVolume();
 
  private:
   Handle m_handle; // the file handle
   const int m_mpiRank;
+  const int m_mpiWorldSize;
   int m_numComps; // the number of components in the file (we will only read
                   // one)
   std::map<std::string, int> m_compMap; // the names of the components
   int m_numLevels;
   bool m_mainHeaderRead = false;
+  bool m_levelHeadersRead = false;
   bool m_blocksRead = false;
   std::vector<int>
       m_refRatios; // the ratio of a level's resolution to the next coarser one
@@ -134,8 +131,26 @@ class Reader
                                     // block will be on
   std::vector<std::vector<float>>
       m_blockDataVector; // the flattened data in each box.
+  bool m_blockDataRead = false;
+  ospray::cpp::Volume m_volume;
+
+  // reads metadata such as the components and numLevels from the main header
+  // under "/",
+  void readMainHeader();
+
+  // reads metadata for every level
+  void readLevelHeaders();
+
+  // reads blockBounds for every level
+  int readBlocks();
+
+  // converts a level index and level to a global block idx
+  int levelToGlobalBlockIdx(int a_levelBlockIdx, int a_level);
 
   void setRankDataOwner();
+
+  // read all block data
+  int readBlockData(const std::string &a_compName);
 
   // reads in the data for a single block on a given level
   int readSingleBlockData(int a_levelBlockIdx,
@@ -143,6 +158,12 @@ class Reader
       int a_comp,
       hid_t a_level_dataset_id,
       hid_t a_level_dataspace_id);
+
+  // sets the block data to 0 for blocks owned by other ranks
+  void zeroSingleBlockData(int a_levelBlockIdx, int a_level);
+
+  // create OSPRay AMR volume
+  void createVolume();
 };
 
 } // namespace ChomboHDF5

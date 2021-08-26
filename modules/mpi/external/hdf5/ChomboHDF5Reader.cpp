@@ -309,10 +309,19 @@ herr_t ChomboHDF5HeaderDataAttributeScan(hid_t a_loc_id,
 
 // Reader //////////////////////////////////////////////////////////////////////
 
-Reader::Reader(const std::string &a_filename, int a_mpiRank)
-    : m_mpiRank(a_mpiRank)
+Reader::Reader(const std::string &a_filename,
+    int a_mpiRank,
+    int a_mpiWorldSize,
+    const std::string &a_compName)
+    : m_mpiRank{a_mpiRank}, m_mpiWorldSize{a_mpiWorldSize}
 {
   m_handle.open(a_filename);
+  readMainHeader();
+  readLevelHeaders();
+  readBlocks();
+  readBlockData(a_compName);
+  createVolume();
+  m_handle.close();
 }
 
 void Reader::readMainHeader()
@@ -377,8 +386,9 @@ void Reader::readLevelHeaders()
       throw std::runtime_error("File: " + m_handle.getFilename()
           + " does not contain dx at level" + std::to_string(ilev) + ".");
     }
-    m_cellWidths[ilev] = levelHeader.m_int["dx"];
+    m_cellWidths[ilev] = levelHeader.m_double["dx"];
   }
+  m_levelHeadersRead = true;
 }
 
 int Reader::readBlocks()
@@ -445,9 +455,11 @@ int Reader::readBlocks()
   /*
   for (int i = 0; i < totalNumBlocks; ++i) {
     box3i &block = m_blockBounds[i];
-    std::cout << "Block: Lower = (" << block.lower.x << ", " << block.lower.y
+    std::cout << "Block: Lower = (" << block.lower.x << ", " <<
+  block.lower.y
               << ", " << block.lower.z << "), Upper = (" << block.upper.x
-              << ", " << block.upper.y << ", " << block.upper.z << ") on level "
+              << ", " << block.upper.y << ", " << block.upper.z << ") on
+  level "
               << m_blockLevels[i] << "\n";
   }
   std::cout << std::flush;
@@ -456,17 +468,24 @@ int Reader::readBlocks()
   return 0;
 }
 
+int Reader::levelToGlobalBlockIdx(int a_levelBlockIdx, int a_level)
+{
+  int thisLevelFirstBlockIdx = 0;
+  for (int ilev = 0; ilev < a_level; ++ilev) {
+    thisLevelFirstBlockIdx += m_numBlocksPerLevel[ilev];
+  }
+  return thisLevelFirstBlockIdx + a_levelBlockIdx;
+}
+
 void Reader::setRankDataOwner()
 {
   if (!m_blocksRead)
     readBlocks();
 
   m_rankDataOwner.resize(m_totalNumBlocks);
-  int numMpiRanks;
-  MPI_Comm_size(MPI_COMM_WORLD, &numMpiRanks);
   for (int iblock = 0; iblock < m_totalNumBlocks; ++iblock) {
     // distribute blocks in a round robin fashion
-    m_rankDataOwner[iblock] = iblock % numMpiRanks;
+    m_rankDataOwner[iblock] = iblock % m_mpiWorldSize;
   }
 }
 
@@ -538,14 +557,17 @@ int Reader::readBlockData(const std::string &a_compName)
         }
 
       } else {
-        // could fill data not owned by this rank by zero (as will be required
-        // for OSPRay Volumes) or leave it to later
+        // set data for blocks not owned by this rank to 0 as OSPRay cannot
+        // currently handle non-existent data
+        zeroSingleBlockData(iblock, ilev);
       }
     }
 
     H5Sclose(level_dataspace_id);
     H5Dclose(level_dataset_id);
   }
+
+  m_blockDataRead = true;
   return 0;
 }
 
@@ -560,11 +582,8 @@ int Reader::readSingleBlockData(int a_levelBlockIdx,
         + ": Requested read of non-existent block");
   }
 
-  int thisLevelFirstBlockIdx = 0;
-  for (int ilev = 0; ilev < a_level; ++ilev) {
-    thisLevelFirstBlockIdx += m_numBlocksPerLevel[ilev];
-  }
-  int globalBlockIdx = thisLevelFirstBlockIdx + a_levelBlockIdx;
+  int thisLevelFirstBlockIdx = levelToGlobalBlockIdx(0, a_level);
+  int globalBlockIdx = levelToGlobalBlockIdx(a_levelBlockIdx, a_level);
 
   // Calculate offset into this level's flattened array.
   hsize_t offset = 0;
@@ -615,6 +634,51 @@ std::cout << "******************************" << std::endl;
 */
   H5Sclose(memDataspace);
   return err;
+}
+
+void Reader::zeroSingleBlockData(int a_levelBlockIdx, int a_level)
+{
+  int globalBlockIdx = levelToGlobalBlockIdx(a_levelBlockIdx, a_level);
+  box3i &block = m_blockBounds[globalBlockIdx];
+  hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x + 1)
+      * (block.upper.y - block.lower.y + 1)
+      * (block.upper.z - block.lower.z + 1));
+  m_blockDataVector[globalBlockIdx] = std::vector<float>(numCells, 0.f);
+}
+
+void Reader::createVolume()
+{
+  if (!m_levelHeadersRead) {
+    readLevelHeaders();
+  }
+  if (!m_blockDataRead) {
+    throw std::runtime_error("Cannot create Volume before block data is read.");
+  }
+
+  // copy data into a vector of cpp::CopiedData for the ospray volume to use
+  std::vector<ospray::cpp::CopiedData> blockData;
+  for (auto singleBlockData : m_blockDataVector) {
+    blockData.emplace_back(
+        singleBlockData.data(), OSP_FLOAT, singleBlockData.size());
+  }
+
+  ospray::cpp::Volume volume("amr");
+  // Chombo volumes have their origin at (0,0,0)
+  volume.setParam("gridOrigin", vec3f(0.f));
+  volume.setParam("gridSpacing", vec3f(m_cellWidths[0]));
+  volume.setParam("block.data", ospray::cpp::CopiedData(blockData));
+  volume.setParam("block.bounds", ospray::cpp::CopiedData(m_blockBounds));
+  volume.setParam("block.level", ospray::cpp::CopiedData(m_blockLevels));
+  volume.setParam("cellWidth", ospray::cpp::CopiedData(m_cellWidths));
+
+  volume.commit();
+
+  m_volume = volume;
+}
+
+ospray::cpp::Volume Reader::getVolume()
+{
+  return m_volume;
 }
 
 } // namespace ChomboHDF5

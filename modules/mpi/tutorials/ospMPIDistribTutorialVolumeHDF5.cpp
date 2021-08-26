@@ -59,17 +59,8 @@ int main(int argc, char **argv)
   MPI_Comm_rank(MPI_COMM_WORLD, &mpiRank);
   MPI_Comm_size(MPI_COMM_WORLD, &mpiWorldSize);
 
-  {
-    ChomboHDF5::Reader hdf5Reader("test.hdf5", mpiRank);
-    hdf5Reader.readMainHeader();
-    hdf5Reader.readLevelHeaders();
-    hdf5Reader.readBlocks();
-    hdf5Reader.readBlockData("chi");
-  }
-
   std::cout << "OSPRay rank " << mpiRank << "/" << mpiWorldSize << "\n";
 
-  /*
   // load the MPI module, and select the MPI distributed device. Here we
   // do not call ospInit, as we want to explicitly pick the distributed
   // device. This can also be done by passing --osp:mpi-distributed when
@@ -91,15 +82,19 @@ int main(int argc, char **argv)
         },
         nullptr);
 
+    // open the hdf5 file, read the data and create the ospray Volume object
+    ChomboHDF5::Reader hdf5reader("test.hdf5", mpiRank, mpiWorldSize, "chi");
+
+    /*
     // all ranks specify the same rendering parameters, with the exception of
     // the data to be rendered, which is distributed among the ranks
-    // VolumeBrick brick = makeLocalVolume(mpiRank, mpiWorldSize);
+    VolumeBrick brick = makeLocalVolume(mpiRank, mpiWorldSize);
 
     // create the "world" model which will contain all of our geometries
     cpp::World world;
-    // world.setParam("instance", cpp::CopiedData(brick.instance));
+    world.setParam("instance", cpp::CopiedData(brick.instance));
 
-    // world.setParam("region", cpp::CopiedData(brick.bounds));
+    world.setParam("region", cpp::CopiedData(brick.bounds));
     world.commit();
 
     // create OSPRay renderer
@@ -137,10 +132,11 @@ int main(int argc, char **argv)
 
     // start the GLFW main loop, which will continuously render
     glfwOSPRayWindow->mainLoop();
+    */
   }
   // cleanly shut OSPRay down
   ospShutdown();
-  */
+
   MPI_Finalize();
 
   return 0;
