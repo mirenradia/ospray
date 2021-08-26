@@ -59,6 +59,14 @@ int main(int argc, char **argv)
   MPI_Comm_rank(MPI_COMM_WORLD, &mpiRank);
   MPI_Comm_size(MPI_COMM_WORLD, &mpiWorldSize);
 
+  if (argc < 3) {
+    if (mpiRank == 0) {
+      std::cerr << "Usage: mpiexec [MPI options] " << argv[0]
+                << " <hdf5 file> <component name>" << std::endl;
+    }
+    MPI_Abort(MPI_COMM_WORLD, 1);
+  }
+
   std::cout << "OSPRay rank " << mpiRank << "/" << mpiWorldSize << "\n";
 
   // load the MPI module, and select the MPI distributed device. Here we
@@ -83,7 +91,7 @@ int main(int argc, char **argv)
         nullptr);
 
     // open the hdf5 file, read the data and create the ospray Volume object
-    ChomboHDF5::Reader hdf5reader("test.hdf5", mpiRank, mpiWorldSize, "chi");
+    ChomboHDF5::Reader hdf5reader(argv[1], mpiRank, mpiWorldSize, argv[2]);
 
     /*
     // all ranks specify the same rendering parameters, with the exception of

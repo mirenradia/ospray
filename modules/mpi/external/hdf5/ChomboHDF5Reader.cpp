@@ -496,7 +496,7 @@ int Reader::readBlockData(const std::string &a_compName)
 
   if (m_compMap.find(a_compName) == m_compMap.end()) {
     throw std::runtime_error(
-        a_compName + " not found in " + m_handle.getFilename());
+        "Component: " + a_compName + " not found in " + m_handle.getFilename());
   }
   int comp = m_compMap[a_compName];
 
