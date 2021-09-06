@@ -90,13 +90,61 @@ int main(int argc, char **argv)
         },
         nullptr);
 
+    std::cerr << "ABOUT TO READ" << std::endl;
+
     // open the hdf5 file, read the data and create the ospray Volume object
     ChomboHDF5::Reader hdf5reader(argv[1], mpiRank, mpiWorldSize, argv[2]);
+    std::cerr << "READ!" << std::endl;
 
-    /*
-    // all ranks specify the same rendering parameters, with the exception of
-    // the data to be rendered, which is distributed among the ranks
-    VolumeBrick brick = makeLocalVolume(mpiRank, mpiWorldSize);
+    VolumeBrick brick;
+
+    //convert from int to float as required by ospray
+    //get the world bounds while we are at it
+    std::vector<box3f> myregions;
+    vec3f min{MAXFLOAT};
+    vec3f max{-MAXFLOAT};
+    for (auto x : hdf5reader.m_blockBounds) {
+        std::cerr << x.lower << " " << x.upper << std::endl;
+        if (x.lower.x < min.x)
+            min.x = x.lower.x;
+        if (x.lower.y < min.y)
+            min.y = x.lower.y;
+        if (x.lower.z < min.z)
+            min.z = x.lower.z;
+        if (x.lower.x > max.x)
+            max.x = x.lower.x;
+        if (x.lower.y > max.y)
+            max.y = x.lower.y;
+        if (x.lower.z > max.z)
+            max.z = x.lower.z;
+        myregions.push_back(box3f(x.lower, x.upper));
+    }
+    //std::cerr << min << " " << max << std::endl;
+
+    brick.brick = hdf5reader.getVolume();
+    brick.bounds = myregions;
+
+    worldBounds = box3f(min*0.25, max*0.25); //seems like we are missing the block scale somewhere
+
+    brick.model = cpp::VolumetricModel(brick.brick);
+    cpp::TransferFunction tfn("piecewiseLinear");
+    std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
+    std::vector<float> opacities = {0.0f, 0.5f, 1.0f};
+    tfn.setParam("color", cpp::CopiedData(colors));
+    tfn.setParam("opacity", cpp::CopiedData(opacities));
+    vec2f valueRange = vec2f(0, 4080.02);
+    tfn.setParam("valueRange", valueRange);
+    tfn.commit();
+    brick.model.setParam("transferFunction", tfn);
+    brick.model.setParam("samplingRate", 0.01f);
+    brick.model.commit();
+
+    brick.group = cpp::Group();
+    brick.group.setParam("volume", cpp::CopiedData(brick.model));
+    brick.group.commit();
+
+    brick.instance = cpp::Instance(brick.group);
+    brick.instance.commit();
 
     // create the "world" model which will contain all of our geometries
     cpp::World world;
@@ -140,7 +188,6 @@ int main(int argc, char **argv)
 
     // start the GLFW main loop, which will continuously render
     glfwOSPRayWindow->mainLoop();
-    */
   }
   // cleanly shut OSPRay down
   ospShutdown();
