@@ -108,6 +108,12 @@ class Reader
   // can pass by value since the Volume object itself does not contain very much
   ospray::cpp::Volume getVolume();
 
+  // get bounding box of whole domain
+  rkcommon::math::box3f getDomainBounds();
+
+  // returns the boundaries of the regions for which the data is on this rank
+  const std::vector<rkcommon::math::box3f> &getMyRegions();
+
  private:
   Handle m_handle; // the file handle
   const int m_mpiRank;
@@ -116,6 +122,7 @@ class Reader
                   // one)
   std::map<std::string, int> m_compMap; // the names of the components
   int m_numLevels;
+  rkcommon::math::box3f m_domainBounds; // the box that is the whole domain
   bool m_mainHeaderRead = false;
   bool m_levelHeadersRead = false;
   bool m_blocksRead = false;
@@ -129,6 +136,8 @@ class Reader
   int m_totalNumBlocks;
   std::vector<int> m_rankDataOwner; // the MPI rank on which the data for each
                                     // block will be on
+  std::vector<rkcommon::math::box3f>
+      m_myRegions; // the regions in the domain owned by this rank
   std::vector<std::vector<float>>
       m_blockDataVector; // the flattened data in each box.
   bool m_blockDataRead = false;

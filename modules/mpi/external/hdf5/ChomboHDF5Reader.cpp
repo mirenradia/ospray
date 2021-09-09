@@ -387,6 +387,21 @@ void Reader::readLevelHeaders()
           + " does not contain dx at level" + std::to_string(ilev) + ".");
     }
     m_cellWidths[ilev] = levelHeader.m_double["dx"];
+
+    if (ilev == 0) {
+      // Chombo stores the problem domain as a "box3i" but we want to convert to
+      // box3f
+      box3i domainBounds_int;
+      if (levelHeader.m_box3i.find("prob_domain")
+          == levelHeader.m_box3i.end()) {
+        throw std::runtime_error("File: " + m_handle.getFilename()
+            + " does not contain prob_domain in the level 0 header.");
+      }
+      domainBounds_int = levelHeader.m_box3i["prob_domain"];
+      m_domainBounds.lower = domainBounds_int.lower * m_cellWidths[ilev];
+      m_domainBounds.upper = (domainBounds_int.upper + 1) * m_cellWidths[ilev];
+      // std::cout << "m_domainBounds = " << m_domainBounds << std::endl;
+    }
   }
   m_levelHeadersRead = true;
 }
@@ -395,6 +410,9 @@ int Reader::readBlocks()
 {
   if (!m_mainHeaderRead) {
     readMainHeader();
+  }
+  if (!m_levelHeadersRead) {
+    readLevelHeaders();
   }
 
   m_blockBounds.clear();
@@ -464,6 +482,19 @@ int Reader::readBlocks()
   }
   std::cout << std::flush;
   */
+  setRankDataOwner();
+  for (int ibox = 0; ibox < m_totalNumBlocks; ++ibox) {
+    if (m_rankDataOwner[ibox] == m_mpiRank) {
+      box3f myRegion;
+      const box3i &blockBound = m_blockBounds[ibox];
+      const int level = m_blockLevels[ibox];
+      const float cellWidth = m_cellWidths[level];
+      myRegion.lower = blockBound.lower * cellWidth;
+      myRegion.upper = (blockBound.upper + 1) * cellWidth;
+      m_myRegions.push_back(myRegion);
+    }
+  }
+
   m_blocksRead = true;
   return 0;
 }
@@ -479,9 +510,6 @@ int Reader::levelToGlobalBlockIdx(int a_levelBlockIdx, int a_level)
 
 void Reader::setRankDataOwner()
 {
-  if (!m_blocksRead)
-    readBlocks();
-
   m_rankDataOwner.resize(m_totalNumBlocks);
   for (int iblock = 0; iblock < m_totalNumBlocks; ++iblock) {
     // distribute blocks in a round robin fashion
@@ -500,7 +528,7 @@ int Reader::readBlockData(const std::string &a_compName)
   }
   int comp = m_compMap[a_compName];
 
-  setRankDataOwner();
+  // setRankDataOwner();
 
   m_blockDataVector.resize(m_totalNumBlocks);
   for (int ilev = 0; ilev < m_numLevels; ++ilev) {
@@ -679,6 +707,16 @@ void Reader::createVolume()
 ospray::cpp::Volume Reader::getVolume()
 {
   return m_volume;
+}
+
+box3f Reader::getDomainBounds()
+{
+  return m_domainBounds;
+}
+
+const std::vector<box3f> &Reader::getMyRegions()
+{
+  return m_myRegions;
 }
 
 } // namespace ChomboHDF5
