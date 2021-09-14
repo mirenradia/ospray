@@ -236,10 +236,15 @@ VolumeBrick makeLocalVolume(const int mpiRank, const int mpiWorldSize)
   gs.getRegions(myregions);
   brick.brick = gs.getVolume();
 
-  float x0 = (2.0*mpiRank)/mpiWorldSize - 1.0;
-  float x1 = (2.0*(mpiRank+1))/mpiWorldSize - 1.0;
-  //brick.bounds.push_back(box3f(vec3f(x0, -1.f, -1.f), vec3f(x1, 1.f, 1.f)));
-  brick.bounds = myregions;
+  bool trustinwombat = true;
+  if (mpiWorldSize == 1)
+      brick.bounds.push_back(box3f(vec3f(-1.f, -1.f, -1.f), vec3f(1.f, 1.f, 1.f)));
+  else if (!trustinwombat) {
+      float x0 = (2.0*mpiRank)/mpiWorldSize - 1.0;
+      float x1 = (2.0*(mpiRank+1))/mpiWorldSize - 1.0;
+      brick.bounds.push_back(box3f(vec3f(x0, -1.f, -1.f), vec3f(x1, 1.f, 1.f)));
+  }  else
+    brick.bounds = myregions;
 
   worldBounds = box3f(vec3f(-1.f), vec3f(1.f));
   //std::cerr << mpiRank << " BBOUNDS = " << brick.bounds << std::endl;

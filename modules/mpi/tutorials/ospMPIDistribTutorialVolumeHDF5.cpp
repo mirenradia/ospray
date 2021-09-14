@@ -13,6 +13,7 @@
 #include <iterator>
 #include <memory>
 #include <random>
+#include "wombat.h"
 #include "ChomboHDF5Reader.h"
 #include "GLFWDistribOSPRayWindow.h"
 #include "ospray/ospray_cpp.h"
@@ -67,6 +68,12 @@ int main(int argc, char **argv)
     MPI_Abort(MPI_COMM_WORLD, 1);
   }
 
+  bool trustInWombat = true;
+  if (argc > 3 && !strcmp(argv[3], "-noWombatNoCry")) {
+      std::cerr << "NO WOMBAT!" << std::endl;
+      trustInWombat = false;
+  }
+
   std::cout << "OSPRay rank " << mpiRank << "/" << mpiWorldSize << "\n";
 
   // load the MPI module, and select the MPI distributed device. Here we
@@ -98,10 +105,76 @@ int main(int argc, char **argv)
 
     VolumeBrick brick;
     brick.brick = hdf5reader.getVolume();
-    brick.bounds = hdf5reader.getMyRegions();
-
     worldBounds = hdf5reader.getDomainBounds(); //seems like we are missing the block scale somewhere
 
+    const std::vector<box3f> &myregions = hdf5reader.getMyRegions();
+
+    if (trustInWombat) {
+      std::vector<box3f> wombatRegions;
+
+      //prep input to wombat, sadly just a reformatting of the existing AMR metadata
+      std::vector<wombat::Level> levels;
+      std::vector<vec3i> levelDims;
+      box3i l0extent = hdf5reader.getDomainBounds_int();
+      vec3i ldims = l0extent.upper - l0extent.lower;
+      int prevRefRatio = 1;
+      for (auto n : hdf5reader.getMyRefRatios())
+      {
+          wombat::Level l;
+          l.refinement[0] = n;
+          l.refinement[1] = n;
+          l.refinement[2] = n;
+          levels.push_back(l);
+          levelDims.push_back((ldims+1) * prevRefRatio);
+          prevRefRatio = prevRefRatio * n;
+      }
+      std::vector<wombat::Box> boxes;
+      const std::vector<int> &blockOwners = hdf5reader.getRankDataOwner();
+      const std::vector<int> &blockLevels = hdf5reader.getBlockLevels();
+      int index = 0;
+      for (auto n : hdf5reader.getBlockBounds())
+      {
+          wombat::Box b;
+          b.owningrank = blockOwners[index];
+          b.level = blockLevels[index];
+          b.origin[0] = n.lower.x;
+          b.origin[1] = n.lower.y;
+          b.origin[2] = n.lower.z;
+          b.dims[0] = n.upper.x-n.lower.x; //TODO +1?
+          b.dims[1] = n.upper.y-n.lower.y;
+          b.dims[2] = n.upper.z-n.lower.z;
+          boxes.push_back(b);
+          index++;
+      }
+
+      std::vector<wombat::Box> sboxes;
+      //run wombat to derive a set of convex regions
+      //std::cerr << rank << " geneology [" << std::endl;
+      wombat::geneology(levels, boxes, mpiRank);
+      //std::cerr << rank << " ] geneology "<< std::endl;
+      //std::cerr << rank << " convexify ["<< std::endl;
+      wombat::convexify(levels, boxes, sboxes);
+      //std::cerr << rank << " ] convexify "<< std::endl;
+
+      //from that run, extract regions owned by this rank
+      std::reverse(levelDims.begin(), levelDims.end());
+      for (int i = 0; i < sboxes.size(); ++i)
+      {
+          wombat::Box b = sboxes[i];
+          if (b.owningrank == mpiRank)
+          {
+              vec3i bs = b.origin;
+              vec3i be = b.dims;
+              vec3f bx0 = vec3f{-1.f} + vec3f{2.f}/levelDims[b.level]*bs;
+              vec3f bx1 = bx0 + vec3f{2.f}/levelDims[b.level]*be;
+              wombatRegions.push_back(box3f(vec3f(bx0.x,bx0.y,bx0.z),vec3f(bx1.x,bx1.y,bx1.z)));
+          }
+      }
+
+      brick.bounds = wombatRegions;
+    } else {
+      brick.bounds = myregions;
+    }
     brick.model = cpp::VolumetricModel(brick.brick);
     cpp::TransferFunction tfn("piecewiseLinear");
     std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};

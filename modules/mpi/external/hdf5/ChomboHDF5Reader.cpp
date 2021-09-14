@@ -391,16 +391,16 @@ void Reader::readLevelHeaders()
     if (ilev == 0) {
       // Chombo stores the problem domain as a "box3i" but we want to convert to
       // box3f
-      box3i domainBounds_int;
       if (levelHeader.m_box3i.find("prob_domain")
           == levelHeader.m_box3i.end()) {
         throw std::runtime_error("File: " + m_handle.getFilename()
             + " does not contain prob_domain in the level 0 header.");
       }
-      domainBounds_int = levelHeader.m_box3i["prob_domain"];
-      m_domainBounds.lower = domainBounds_int.lower * m_cellWidths[ilev];
-      m_domainBounds.upper = (domainBounds_int.upper + 1) * m_cellWidths[ilev];
-      // std::cout << "m_domainBounds = " << m_domainBounds << std::endl;
+      m_domainBounds_int = levelHeader.m_box3i["prob_domain"];
+      m_domainBounds.lower = m_domainBounds_int.lower * m_cellWidths[ilev];
+      m_domainBounds.upper = (m_domainBounds_int.upper + 1) * m_cellWidths[ilev];
+      std::cout << "m_domainBounds_int = " << m_domainBounds_int.upper-m_domainBounds_int.lower+1 << std::endl;
+      std::cout << "m_domainBounds = " << m_domainBounds << std::endl;
     }
   }
   m_levelHeadersRead = true;
@@ -709,6 +709,11 @@ ospray::cpp::Volume Reader::getVolume()
   return m_volume;
 }
 
+box3i Reader::getDomainBounds_int()
+{
+  return m_domainBounds_int;
+}
+
 box3f Reader::getDomainBounds()
 {
   return m_domainBounds;
@@ -717,6 +722,26 @@ box3f Reader::getDomainBounds()
 const std::vector<box3f> &Reader::getMyRegions()
 {
   return m_myRegions;
+}
+
+const std::vector<int> &Reader::getMyRefRatios()
+{
+  return m_refRatios;
+}
+
+const std::vector<box3i> &Reader::getBlockBounds()
+{
+  return m_blockBounds;
+}
+
+const std::vector<int> &Reader::getRankDataOwner()
+{
+  return m_rankDataOwner;
+}
+
+const std::vector<int> &Reader::getBlockLevels()
+{
+  return m_blockLevels;
 }
 
 } // namespace ChomboHDF5

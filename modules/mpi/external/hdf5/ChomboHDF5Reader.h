@@ -109,10 +109,23 @@ class Reader
   ospray::cpp::Volume getVolume();
 
   // get bounding box of whole domain
+  rkcommon::math::box3i getDomainBounds_int();
   rkcommon::math::box3f getDomainBounds();
 
   // returns the boundaries of the regions for which the data is on this rank
   const std::vector<rkcommon::math::box3f> &getMyRegions();
+
+  // returns refinements per level
+  const std::vector<int> &getMyRefRatios();
+
+  // returns index space bounds of all regions
+  const std::vector<rkcommon::math::box3i> &getBlockBounds();
+
+  // returns refinements per level
+  const std::vector<int> &getRankDataOwner();
+
+  // returns level number for each block
+  const std::vector<int> &getBlockLevels();
 
  private:
   Handle m_handle; // the file handle
@@ -122,6 +135,7 @@ class Reader
                   // one)
   std::map<std::string, int> m_compMap; // the names of the components
   int m_numLevels;
+  rkcommon::math::box3i m_domainBounds_int; // the box that is the whole domain
   rkcommon::math::box3f m_domainBounds; // the box that is the whole domain
   bool m_mainHeaderRead = false;
   bool m_levelHeadersRead = false;
