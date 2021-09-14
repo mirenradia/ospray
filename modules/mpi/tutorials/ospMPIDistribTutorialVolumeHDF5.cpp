@@ -105,7 +105,8 @@ int main(int argc, char **argv)
 
     VolumeBrick brick;
     brick.brick = hdf5reader.getVolume();
-    worldBounds = hdf5reader.getDomainBounds(); //seems like we are missing the block scale somewhere
+    worldBounds = hdf5reader.getDomainBounds();
+    std::cerr << "WB = " << worldBounds << std::endl;
 
     const std::vector<box3f> &myregions = hdf5reader.getMyRegions();
 
@@ -120,13 +121,14 @@ int main(int argc, char **argv)
       int prevRefRatio = 1;
       for (auto n : hdf5reader.getMyRefRatios())
       {
-          wombat::Level l;
-          l.refinement[0] = n;
-          l.refinement[1] = n;
-          l.refinement[2] = n;
-          levels.push_back(l);
-          levelDims.push_back((ldims+1) * prevRefRatio);
-          prevRefRatio = prevRefRatio * n;
+        wombat::Level l;
+        l.refinement[0] = n;
+        l.refinement[1] = n;
+        l.refinement[2] = n;
+        levels.push_back(l);
+        std::cerr << "L " << levelDims.size() << " " << (ldims+1) * prevRefRatio << std::endl;
+        levelDims.push_back((ldims+1) * prevRefRatio);
+        prevRefRatio = prevRefRatio * n;
       }
       std::vector<wombat::Box> boxes;
       const std::vector<int> &blockOwners = hdf5reader.getRankDataOwner();
@@ -134,17 +136,21 @@ int main(int argc, char **argv)
       int index = 0;
       for (auto n : hdf5reader.getBlockBounds())
       {
-          wombat::Box b;
-          b.owningrank = blockOwners[index];
-          b.level = blockLevels[index];
-          b.origin[0] = n.lower.x;
-          b.origin[1] = n.lower.y;
-          b.origin[2] = n.lower.z;
-          b.dims[0] = n.upper.x-n.lower.x; //TODO +1?
-          b.dims[1] = n.upper.y-n.lower.y;
-          b.dims[2] = n.upper.z-n.lower.z;
-          boxes.push_back(b);
-          index++;
+        wombat::Box b;
+        b.owningrank = blockOwners[index];
+        b.level = blockLevels[index];
+        b.origin[0] = n.lower.x;
+        b.origin[1] = n.lower.y;
+        b.origin[2] = n.lower.z;
+        b.dims[0] = n.upper.x-n.lower.x; //TODO +1?
+        b.dims[1] = n.upper.y-n.lower.y;
+        b.dims[2] = n.upper.z-n.lower.z;
+        //std::cerr << index << " " << b.owningrank << " " << b.level << " "
+        //          << b.origin[0] << "," << b.origin[1] << "," << b.origin[2] << ","
+        //          << b.dims[0] << "," << b.dims[1] << "," << b.dims[2] <<
+        //             std::endl;
+        boxes.push_back(b);
+        index++;
       }
 
       std::vector<wombat::Box> sboxes;
@@ -156,36 +162,39 @@ int main(int argc, char **argv)
       wombat::convexify(levels, boxes, sboxes);
       //std::cerr << rank << " ] convexify "<< std::endl;
 
-      //from that run, extract regions owned by this rank
-      std::reverse(levelDims.begin(), levelDims.end());
+      //from that run, tell compositor the regions that this rank owns in worldspace
       for (int i = 0; i < sboxes.size(); ++i)
       {
-          wombat::Box b = sboxes[i];
-          if (b.owningrank == mpiRank)
-          {
-              vec3i bs = b.origin;
-              vec3i be = b.dims;
-              vec3f bx0 = vec3f{-1.f} + vec3f{2.f}/levelDims[b.level]*bs;
-              vec3f bx1 = bx0 + vec3f{2.f}/levelDims[b.level]*be;
-              wombatRegions.push_back(box3f(vec3f(bx0.x,bx0.y,bx0.z),vec3f(bx1.x,bx1.y,bx1.z)));
-          }
+        wombat::Box b = sboxes[i];
+        if (b.owningrank == mpiRank)
+        {
+          vec3i bs = b.origin;
+          vec3i be = b.dims;
+          vec3f bx0 = (vec3f(bs)/vec3f(levelDims[b.level])) * worldBounds.upper;
+          vec3f bx1 = bx0 + (vec3f(be)/vec3f(levelDims[b.level])) * worldBounds.upper;
+          wombatRegions.push_back(box3f(vec3f(bx0.x,bx0.y,bx0.z),vec3f(bx1.x,bx1.y,bx1.z)));
+          //std::cerr << i << " " << b.owningrank << " " << b.level << " "
+          //          << bs << ".." << be << "->"
+          //          << bx0 << "," << bx1 << std::endl;
+        }
       }
-
       brick.bounds = wombatRegions;
+
     } else {
       brick.bounds = myregions;
     }
+    //brick.brick.setParam("method", OSP_AMR_FINEST);
+    brick.brick.commit();
     brick.model = cpp::VolumetricModel(brick.brick);
     cpp::TransferFunction tfn("piecewiseLinear");
-    std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
-    std::vector<float> opacities = {0.0f, 0.6f, 0.0f, 0.0f};
+    std::vector<vec3f> colors = {vec3f(0.f, 0.f, 0.f), vec3f(0.f, 0.f, 1.f), vec3f(0.f, 0.f, 0.f), vec3f(0.f, 0.f, 0.f)};
+    std::vector<float> opacities = {0.0f, 0.5f, 0.0f, 0.0f};
     tfn.setParam("color", cpp::CopiedData(colors));
     tfn.setParam("opacity", cpp::CopiedData(opacities));
-    vec2f valueRange = vec2f(4.8189e-5, 0.96435);
+    vec2f valueRange = vec2f(0.2, 0.96435);
     tfn.setParam("valueRange", valueRange);
     tfn.commit();
     brick.model.setParam("transferFunction", tfn);
-    brick.model.setParam("samplingRate", 0.01f);
     brick.model.commit();
 
     brick.group = cpp::Group();
@@ -204,6 +213,7 @@ int main(int argc, char **argv)
 
     // create OSPRay renderer
     cpp::Renderer renderer("mpiRaycast");
+    //renderer.setParam("volumeSamplingRate", 20.0f);
 
     // create and setup an ambient light
     cpp::Light ambientLight("ambient");

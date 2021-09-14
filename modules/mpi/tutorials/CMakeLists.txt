@@ -108,13 +108,19 @@ ospray_create_mpi_tutorial(ospMPIDistribTutorialSpheres
 ospray_sign_target(ospMPIDistribTutorialSpheres)
 
 ospray_create_mpi_tutorial(ospMPIDistribTutorialVolume
-  wombat.cxx
-  rawToAMR.cpp
-  GravitySpheresVolume.cpp
   ospMPIDistribTutorialVolume.cpp
 )
 
 ospray_sign_target(ospMPIDistribTutorialVolume)
+
+ospray_create_mpi_tutorial(ospMPIDistribTutorialAMR
+  wombat.cxx
+  rawToAMR.cpp
+  GravitySpheresVolume.cpp
+  ospMPIDistribTutorialAMR.cpp
+)
+
+ospray_sign_target(ospMPIDistribTutorialVolumeAMR)
 
 if (OSPRAY_MPI_USE_HDF5)
   ospray_create_mpi_hdf5_tutorial(ospMPIDistribTutorialVolumeHDF5
