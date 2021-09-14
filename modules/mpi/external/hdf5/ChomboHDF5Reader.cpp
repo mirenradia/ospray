@@ -1,5 +1,6 @@
 #include "ChomboHDF5Reader.h"
 #include <string.h>
+#include <algorithm>
 #include <stdexcept>
 
 namespace ChomboHDF5 {
@@ -702,6 +703,47 @@ void Reader::createVolume()
   volume.commit();
 
   m_volume = volume;
+}
+
+vec2f Reader::calculateValueRange()
+{
+  if (!m_blockDataRead) {
+    throw std::runtime_error(
+        "Data must be read before value range can be"
+        "calculated");
+  }
+
+  // first find the min and max on my rank
+  bool myFirstBox = true;
+  vec2f localMinMax;
+
+  for (int ibox = 0; ibox < m_totalNumBlocks; ++ibox) {
+    if (m_rankDataOwner[ibox] == m_mpiRank) {
+      const std::vector<float> &blockData = m_blockDataVector[ibox];
+      auto minmax_its = std::minmax_element(blockData.begin(), blockData.end());
+      float blockMin = *(minmax_its.first);
+      float blockMax = *(minmax_its.second);
+      if (myFirstBox) {
+        localMinMax[0] = blockMin;
+        localMinMax[1] = blockMax;
+        myFirstBox = false;
+      } else {
+        localMinMax[0] =
+            (localMinMax[0] > blockMin) ? blockMin : localMinMax[0];
+        localMinMax[1] =
+            (localMinMax[1] < blockMax) ? blockMax : localMinMax[1];
+      }
+    }
+  }
+
+  vec2f globalMinMax;
+  // now do MPI reductions to determine global extrema
+  MPI_Allreduce(
+      &localMinMax[0], &globalMinMax[0], 1, MPI_FLOAT, MPI_MIN, MPI_COMM_WORLD);
+  MPI_Allreduce(
+      &localMinMax[1], &globalMinMax[1], 1, MPI_FLOAT, MPI_MAX, MPI_COMM_WORLD);
+
+  return globalMinMax;
 }
 
 ospray::cpp::Volume Reader::getVolume()

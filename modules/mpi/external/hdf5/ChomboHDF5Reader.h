@@ -105,6 +105,9 @@ class Reader
       int a_mpiWorldSize,
       const std::string &a_compName);
 
+  // calculate the min and max values in the data
+  rkcommon::math::vec2f calculateValueRange();
+
   // can pass by value since the Volume object itself does not contain very much
   ospray::cpp::Volume getVolume();
 
