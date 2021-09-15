@@ -164,8 +164,8 @@ int main(int argc, char **argv)
         {
           vec3i bo = b.origin;
           vec3i bd = b.dims;
-          vec3f bx0 = ((vec3f(bo)-vec3f(0.0))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
-          vec3f bx1 = ((vec3f(bo+bd)+vec3f(0.0))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
+          vec3f bx0 = ((vec3f(bo)+vec3f(0.0))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
+          vec3f bx1 = ((vec3f(bo+bd)-vec3f(0.0))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
           wombatRegions.push_back(box3f(vec3f(bx0.x,bx0.y,bx0.z),vec3f(bx1.x,bx1.y,bx1.z)));
           //std::cerr << "OUT: " << index << " " << b.owningrank << " " << b.level << " "
           //          << bo << ".." << bd << "->"

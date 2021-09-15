@@ -14,6 +14,11 @@ typedef std::pair<int, Box> BoxWithID;
 
 bool subdivide(Box box, std::vector<Box> children, int axis, std::vector<Box> &convexBoxes) {
 
+  if (box.dims[0] <= 2 && box.dims[1] <= 2 && box.dims[2] <= 2) {
+    //an optimization, simply ignoring tiny boxes speeds it up _a lot_
+    //return false;
+  }
+
   if (children.size() == 0) {
     //no children therefore convex
     //std::cerr << "no children" << std::endl;
@@ -21,16 +26,17 @@ bool subdivide(Box box, std::vector<Box> children, int axis, std::vector<Box> &c
     return true;
   }
 
-  //std::cerr << "ORG " << box.origin[0] << "," << box.origin[1] << "," << box.origin[2] << ", DIMS " << box.dims[0] << "," << box.dims[1] << "," << box.dims[2] << std::endl;
   if (box.dims[0] == 0 || box.dims[1] == 0 || box.dims[2] == 0) {
-    //std::cerr << "huh?" << std::endl; //May be a bug.
+    //std::cerr << "huh?" << std::endl; //May be a bug?
     return false;
   }
   if (box.dims[0] <= 1 && box.dims[1] <= 1 && box.dims[2] <= 1) {
     //convexBoxes.push_back(box);
-    //std::cerr << "hey?" << std::endl; //optimization, ignore tiny boxes that are fully covered. Todo - not just tiny.
+    //std::cerr << "hey?" << std::endl; //optimization, ignore tiny boxes that are fully covered. I think fully covered large boxes eventually get here too.
     return true;
   }
+
+  //std::cerr << "ORG " << box.origin[0] << "," << box.origin[1] << "," << box.origin[2] << ", DIMS " << box.dims[0] << "," << box.dims[1] << "," << box.dims[2] << std::endl;
 
   Box lhalf = box;
   lhalf.origin[axis] = box.origin[axis];
@@ -75,7 +81,7 @@ bool convexify(const std::vector<Level> _levels, const std::vector<Box> inBoxes,
   levels = _levels;
 
   for (int l = 0; l < static_cast<int>(levels.size()); ++l) {
-    std::cerr << "Working on Level " << l << std::endl;
+    //std::cerr << "Working on Level " << l << std::endl;
     std::vector<BoxWithID> boxesAtLevel;
     for (int b = 0; b < static_cast<int>(inBoxes.size()); ++b) {
       if (inBoxes[b].level == l) {
@@ -125,13 +131,13 @@ void geneology(const std::vector<Level> _levels, std::vector<Box> &inBoxes, int 
     for (int B = 0; B < static_cast<int>(currentLevel.size()); ++B) {
       Box p = currentLevel[B].second;
       vec3i px0 = vec3i{p.origin[0],p.origin[1],p.origin[2]}*vref;
-      vec3i px1 = px0 + vec3i{p.dims[0]+1,p.dims[1]+1,p.dims[2]+1}*vref;
+      vec3i px1 = px0 + vec3i{p.dims[0],p.dims[1],p.dims[2]}*vref;
       //std::cerr << B << "," << currentLevel[B].first << " " << p.parent << " " << px0 << "-" << px1 << std::endl;
 
       for (int b = 0; b < static_cast<int>(nextLevel.size()); ++b) {
         Box c = nextLevel[b].second;
         vec3i bx0 = vec3i{c.origin[0],c.origin[1],c.origin[2]};
-        vec3i bx1 = bx0+vec3i{c.dims[0]+1,c.dims[1]+1,c.dims[2]+1};
+        vec3i bx1 = bx0+vec3i{c.dims[0],c.dims[1],c.dims[2]};
         if ( bx0.x >= px0.x && bx1.x <= px1.x &&
              bx0.y >= px0.y && bx1.y <= px1.y &&
              bx0.z >= px0.z && bx1.z <= px1.z) {
@@ -150,10 +156,10 @@ void geneology(const std::vector<Level> _levels, std::vector<Box> &inBoxes, int 
   }
 
   //std::cerr << " ownership" << std::endl;
-  for (int B = 0; B < static_cast<int>(inBoxes.size()); ++B) {
-     Box p = inBoxes[B];
+  //for (int B = 0; B < static_cast<int>(inBoxes.size()); ++B) {
+     //Box p = inBoxes[B];
      //std::cerr << B << " " << p.level << /*" " << p.owningrank <<*/ " " << p.parent << " " << p.origin[0] << "," << p.origin[1] << "," << p.origin[2] << " " << p.dims[0] << "," << p.dims[1] << "," << p.dims[2] << std::endl;
-  }
+  //}
   //std::cerr << rank << " DONE" << std::endl;
 
 }
