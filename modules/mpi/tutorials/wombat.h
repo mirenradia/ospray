@@ -16,7 +16,7 @@ typedef struct Level {
 typedef struct Box {
   int owningrank; //NU //the mpi rank of the owner of this box
   int level; //the level that this box belongs to
-  int parent; //index of parent at previous level within inBoxes array.
+  int parent = -1; //index of parent at previous level within inBoxes array.
   int origin[3]; //index into level of lower left corner
   int dims[3]; //index space i,j,k number of cells
 } Box;

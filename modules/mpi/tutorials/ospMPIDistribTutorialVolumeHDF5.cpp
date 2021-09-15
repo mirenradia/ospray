@@ -67,7 +67,7 @@ int main(int argc, char **argv)
 
   bool trustInWombat = true;
   if (argc > 3 && !strcmp(argv[3], "-noWombatNoCry")) {
-      std::cerr << "NO WOMBAT!" << std::endl;
+      std::cout << "No Wombat!" << std::endl;
       trustInWombat = false;
   }
 
@@ -94,24 +94,21 @@ int main(int argc, char **argv)
         },
         nullptr);
 
-    std::cerr << "ABOUT TO READ" << std::endl;
-
     // open the hdf5 file, read the data and create the ospray Volume object
     ChomboHDF5::Reader hdf5reader(argv[1], mpiRank, mpiWorldSize, argv[2]);
-    std::cerr << "READ!" << std::endl;
 
     usleep(500000*mpiRank); //quick hack to segregate rank debugfs
-    std::cerr << "-----------------------------------" << std::endl;
-    std::cerr << "RANK " << mpiRank << std::endl;
+    //std::cerr << "-----------------------------------" << std::endl;
+    //std::cerr << "RANK " << mpiRank << std::endl;
 
     VolumeBrick brick;
     brick.brick = hdf5reader.getVolume();
     worldBounds = hdf5reader.getDomainBounds();
-    std::cerr << "WB = " << worldBounds << std::endl;
+    //std::cerr << "WB = " << worldBounds << std::endl;
 
     const std::vector<box3f> &myregions = hdf5reader.getMyRegions();
 
-    if (trustInWombat) {
+    if (trustInWombat) { //todo: don't bother on single node
       std::vector<box3f> wombatRegions;
 
       //prep input to wombat, sadly just a reformatting of the existing AMR metadata
@@ -127,7 +124,7 @@ int main(int argc, char **argv)
         l.refinement[1] = n;
         l.refinement[2] = n;
         levels.push_back(l);
-        std::cerr << "L " << levelDims.size() << " " << (ldims+1) * prevRefRatio << std::endl;
+        //std::cerr << "L " << levelDims.size() << " " << (ldims+1) * prevRefRatio << std::endl;
         levelDims.push_back((ldims+1) * prevRefRatio);
         prevRefRatio = prevRefRatio * n;
       }
@@ -146,21 +143,17 @@ int main(int argc, char **argv)
         b.dims[0] = n.upper.x-n.lower.x;
         b.dims[1] = n.upper.y-n.lower.y;
         b.dims[2] = n.upper.z-n.lower.z;
-        std::cerr << "IN:  " << index << " " << b.owningrank << " " << b.level << " "
-                  << "(" << b.origin[0] << "," << b.origin[1] << "," << b.origin[2] << ")..("
-                  << b.dims[0] << "," << b.dims[1] << "," << b.dims[2] << ")" << std::endl;
+        //std::cerr << "IN:  " << index << " " << b.owningrank << " " << b.level << " "
+        //          << "(" << b.origin[0] << "," << b.origin[1] << "," << b.origin[2] << ")..("
+        //          << b.dims[0] << "," << b.dims[1] << "," << b.dims[2] << ")" << std::endl;
         boxes.push_back(b);
         index++;
       }
 
       std::vector<wombat::Box> sboxes;
       //run wombat to derive a set of convex regions
-      //std::cerr << rank << " geneology [" << std::endl;
       wombat::geneology(levels, boxes, mpiRank);
-      //std::cerr << rank << " ] geneology "<< std::endl;
-      //std::cerr << rank << " convexify ["<< std::endl;
       wombat::convexify(levels, boxes, sboxes);
-      //std::cerr << rank << " ] convexify "<< std::endl;
 
       //from that run, tell compositor the regions that this rank owns in worldspace
       index = 0;
@@ -171,16 +164,15 @@ int main(int argc, char **argv)
         {
           vec3i bo = b.origin;
           vec3i bd = b.dims;
-          vec3f bx0 = ((vec3f(bo)-vec3f(0.5))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
-          vec3f bx1 = ((vec3f(bo+bd)+vec3f(0.5))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
+          vec3f bx0 = ((vec3f(bo)-vec3f(0.0))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
+          vec3f bx1 = ((vec3f(bo+bd)+vec3f(0.0))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
           wombatRegions.push_back(box3f(vec3f(bx0.x,bx0.y,bx0.z),vec3f(bx1.x,bx1.y,bx1.z)));
-          std::cerr << "OUT: " << index << " " << b.owningrank << " " << b.level << " "
-                    << bo << ".." << bd << "->"
-                    << bx0 << "," << bx1 << std::endl;
+          //std::cerr << "OUT: " << index << " " << b.owningrank << " " << b.level << " "
+          //          << bo << ".." << bd << "->"
+          //          << bx0 << "," << bx1 << std::endl;
         }
       }
       brick.bounds = wombatRegions;
-
     } else {
       brick.bounds = myregions;
     }

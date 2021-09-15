@@ -399,8 +399,6 @@ void Reader::readLevelHeaders()
       m_domainBounds_int = levelHeader.m_box3i["prob_domain"];
       m_domainBounds.lower = m_domainBounds_int.lower * m_cellWidths[ilev];
       m_domainBounds.upper = (m_domainBounds_int.upper + 1) * m_cellWidths[ilev];
-      std::cout << "m_domainBounds_int = " << m_domainBounds_int.upper-m_domainBounds_int.lower+1 << std::endl;
-      std::cout << "m_domainBounds = " << m_domainBounds << std::endl;
     }
   }
   m_levelHeadersRead = true;
