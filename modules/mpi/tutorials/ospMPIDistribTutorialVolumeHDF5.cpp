@@ -40,9 +40,6 @@ struct VolumeBrick
 
 static box3f worldBounds;
 
-// Generate the rank's local volume brick
-VolumeBrick makeLocalVolume(const int mpiRank, const int mpiWorldSize);
-
 int main(int argc, char **argv)
 {
   int mpiThreadCapability = 0;
@@ -103,6 +100,10 @@ int main(int argc, char **argv)
     ChomboHDF5::Reader hdf5reader(argv[1], mpiRank, mpiWorldSize, argv[2]);
     std::cerr << "READ!" << std::endl;
 
+    usleep(500000*mpiRank); //quick hack to segregate rank debugfs
+    std::cerr << "-----------------------------------" << std::endl;
+    std::cerr << "RANK " << mpiRank << std::endl;
+
     VolumeBrick brick;
     brick.brick = hdf5reader.getVolume();
     worldBounds = hdf5reader.getDomainBounds();
@@ -142,13 +143,12 @@ int main(int argc, char **argv)
         b.origin[0] = n.lower.x;
         b.origin[1] = n.lower.y;
         b.origin[2] = n.lower.z;
-        b.dims[0] = n.upper.x-n.lower.x; //TODO +1?
+        b.dims[0] = n.upper.x-n.lower.x;
         b.dims[1] = n.upper.y-n.lower.y;
         b.dims[2] = n.upper.z-n.lower.z;
-        //std::cerr << index << " " << b.owningrank << " " << b.level << " "
-        //          << b.origin[0] << "," << b.origin[1] << "," << b.origin[2] << ","
-        //          << b.dims[0] << "," << b.dims[1] << "," << b.dims[2] <<
-        //             std::endl;
+        std::cerr << "IN:  " << index << " " << b.owningrank << " " << b.level << " "
+                  << "(" << b.origin[0] << "," << b.origin[1] << "," << b.origin[2] << ")..("
+                  << b.dims[0] << "," << b.dims[1] << "," << b.dims[2] << ")" << std::endl;
         boxes.push_back(b);
         index++;
       }
@@ -163,19 +163,20 @@ int main(int argc, char **argv)
       //std::cerr << rank << " ] convexify "<< std::endl;
 
       //from that run, tell compositor the regions that this rank owns in worldspace
-      for (int i = 0; i < sboxes.size(); ++i)
+      index = 0;
+      for (; index < sboxes.size(); ++index)
       {
-        wombat::Box b = sboxes[i];
+        wombat::Box b = sboxes[index];
         if (b.owningrank == mpiRank)
         {
-          vec3i bs = b.origin;
-          vec3i be = b.dims;
-          vec3f bx0 = (vec3f(bs)/vec3f(levelDims[b.level])) * worldBounds.upper;
-          vec3f bx1 = bx0 + (vec3f(be)/vec3f(levelDims[b.level])) * worldBounds.upper;
+          vec3i bo = b.origin;
+          vec3i bd = b.dims;
+          vec3f bx0 = ((vec3f(bo)-vec3f(0.5))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
+          vec3f bx1 = ((vec3f(bo+bd)+vec3f(0.5))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
           wombatRegions.push_back(box3f(vec3f(bx0.x,bx0.y,bx0.z),vec3f(bx1.x,bx1.y,bx1.z)));
-          //std::cerr << i << " " << b.owningrank << " " << b.level << " "
-          //          << bs << ".." << be << "->"
-          //          << bx0 << "," << bx1 << std::endl;
+          std::cerr << "OUT: " << index << " " << b.owningrank << " " << b.level << " "
+                    << bo << ".." << bd << "->"
+                    << bx0 << "," << bx1 << std::endl;
         }
       }
       brick.bounds = wombatRegions;
@@ -187,11 +188,13 @@ int main(int argc, char **argv)
     brick.brick.commit();
     brick.model = cpp::VolumetricModel(brick.brick);
     cpp::TransferFunction tfn("piecewiseLinear");
-    std::vector<vec3f> colors = {vec3f(0.f, 0.f, 0.f), vec3f(0.f, 0.f, 1.f), vec3f(0.f, 0.f, 0.f), vec3f(0.f, 0.f, 0.f)};
-    std::vector<float> opacities = {0.0f, 0.5f, 0.0f, 0.0f};
+    std::vector<vec3f> colors = {vec3f(0.f), vec3f(0.f, 0.f, 1.f), vec3f(0.f), vec3f(1.f, 0.f, 0.f), vec3f(0.f)};
+    //std::vector<float> opacities = {0.0f, 0.0f, 0.2f, 0.4f, 0.6f, 0.8f};
+    std::vector<float> opacities = {0.0f, 0.0f, 0.5f, 0.0f, 0.00f, 0.0f};
     tfn.setParam("color", cpp::CopiedData(colors));
     tfn.setParam("opacity", cpp::CopiedData(opacities));
-    vec2f valueRange = vec2f(0.2, 0.96435);
+    vec2f valueRange = vec2f(0.2, 0.96435); //binary
+    //vec2f valueRange = vec2f(0.0, 4000); //amelia
     tfn.setParam("valueRange", valueRange);
     tfn.commit();
     brick.model.setParam("transferFunction", tfn);
@@ -255,137 +258,3 @@ int main(int argc, char **argv)
 
   return 0;
 }
-
-bool computeDivisor(int x, int &divisor)
-{
-  int upperBound = std::sqrt(x);
-  for (int i = 2; i <= upperBound; ++i) {
-    if (x % i == 0) {
-      divisor = i;
-      return true;
-    }
-  }
-  return false;
-}
-
-// Compute an X x Y x Z grid to have 'num' grid cells,
-// only gives a nice grid for numbers with even factors since
-// we don't search for factors of the number, we just try dividing by two
-vec3i computeGrid(int num)
-{
-  vec3i grid(1);
-  int axis = 0;
-  int divisor = 0;
-  while (computeDivisor(num, divisor)) {
-    grid[axis] *= divisor;
-    num /= divisor;
-    axis = (axis + 1) % 3;
-  }
-  if (num != 1) {
-    grid[axis] *= num;
-  }
-  return grid;
-}
-
-/*
-VolumeBrick makeLocalVolume(const int mpiRank, const int mpiWorldSize)
-{
-#if 0
-    const vec3i grid = computeGrid(mpiWorldSize);
-    const vec3i brickId(mpiRank % grid.x,
-        (mpiRank / grid.x) % grid.y,
-        mpiRank / (grid.x * grid.y));
-    // The bricks are 64^3 + 1 layer of ghost voxels on each axis
-    const vec3i brickVolumeDims = vec3i(32);
-    const vec3i brickGhostDims = vec3i(brickVolumeDims + 2);
-
-    // The grid is over the [0, grid * brickVolumeDims] box
-    worldBounds = box3f(vec3f(0.f), vec3f(grid * brickVolumeDims));
-    const vec3f brickLower = brickId * brickVolumeDims;
-    const vec3f brickUpper = brickId * brickVolumeDims + brickVolumeDims;
-
-    VolumeBrick brick;
-    brick.bounds = box3f(brickLower, brickUpper);
-    std::cerr << brickLower << " to " << brickUpper << std::endl;
-    // we just put ghost voxels on all sides here, but a real application
-    // would change which faces of each brick have ghost voxels dependent
-    // on the actual data
-    brick.ghostBounds = box3f(brickLower - vec3f(1.f), brickUpper + vec3f(1.f));
-
-    brick.brick = cpp::Volume("structuredRegular");
-
-    brick.brick.setParam("dimensions", brickGhostDims);
-
-    // we use the grid origin to place this brick in the right position inside
-    // the global volume
-    brick.brick.setParam("gridOrigin", brick.ghostBounds.lower);
-
-    // generate the volume data to just be filled with this rank's id
-    const size_t nVoxels = brickGhostDims.x * brickGhostDims.y *
-brickGhostDims.z; std::vector<uint8_t> volumeData(nVoxels,
-static_cast<uint8_t>(mpiRank)); brick.brick.setParam("data",
-        cpp::CopiedData(static_cast<const uint8_t *>(volumeData.data()),
-            vec3ul(brickVolumeDims)));
-
-    brick.brick.commit();
-
-    brick.model = cpp::VolumetricModel(brick.brick);
-    cpp::TransferFunction tfn("piecewiseLinear");
-    std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
-    std::vector<float> opacities = {0.05f, 1.f};
-
-    tfn.setParam("color", cpp::CopiedData(colors));
-    tfn.setParam("opacity", cpp::CopiedData(opacities));
-    // color the bricks by their rank, we pad the range out a bit to keep
-    // any brick from being completely transparent
-    vec2f valueRange = vec2f(0, mpiWorldSize);
-    tfn.setParam("valueRange", valueRange);
-    tfn.commit();
-    brick.model.setParam("transferFunction", tfn);
-    brick.model.setParam("samplingRate", 0.01f);
-    brick.model.commit();
-
-    brick.group = cpp::Group();
-    brick.group.setParam("volume", cpp::CopiedData(brick.model));
-    brick.group.commit();
-
-#else
-  VolumeBrick brick;
-
-  GravitySpheres gs(true, mpiRank, mpiWorldSize);
-  std::vector<box3f> myregions;
-  gs.getRegions(myregions);
-  brick.brick = gs.getVolume();
-
-  float x0 = (2.0*mpiRank)/mpiWorldSize - 1.0;
-  float x1 = (2.0*(mpiRank+1))/mpiWorldSize - 1.0;
-  //brick.bounds.push_back(box3f(vec3f(x0, -1.f, -1.f), vec3f(x1, 1.f, 1.f)));
-  brick.bounds = myregions;
-
-  worldBounds = box3f(vec3f(-1.f), vec3f(1.f));
-  //std::cerr << mpiRank << " BBOUNDS = " << brick.bounds << std::endl;
-
-  brick.model = cpp::VolumetricModel(brick.brick);
-  cpp::TransferFunction tfn("piecewiseLinear");
-  std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
-  std::vector<float> opacities = {0.0f, 0.0f, 1.0f};
-  tfn.setParam("color", cpp::CopiedData(colors));
-  tfn.setParam("opacity", cpp::CopiedData(opacities));
-  vec2f valueRange = vec2f(0, 10.0);
-  tfn.setParam("valueRange", valueRange);
-  tfn.commit();
-  brick.model.setParam("transferFunction", tfn);
-  brick.model.setParam("samplingRate", 0.01f);
-  brick.model.commit();
-
-  brick.group = cpp::Group();
-  brick.group.setParam("volume", cpp::CopiedData(brick.model));
-  brick.group.commit();
-#endif
-
-  brick.instance = cpp::Instance(brick.group);
-  brick.instance.commit();
-
-  return brick;
-}
-*/
