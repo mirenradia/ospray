@@ -21,6 +21,8 @@
 #include "ospray/ospray_util.h"
 //#include "GravitySpheresVolume.h"
 
+#include <unistd.h>
+
 using namespace ospray;
 using namespace rkcommon;
 using namespace rkcommon::math;
@@ -143,9 +145,9 @@ int main(int argc, char **argv)
         b.dims[0] = n.upper.x-n.lower.x;
         b.dims[1] = n.upper.y-n.lower.y;
         b.dims[2] = n.upper.z-n.lower.z;
-        //std::cerr << "IN:  " << index << " " << b.owningrank << " " << b.level << " "
-        //          << "(" << b.origin[0] << "," << b.origin[1] << "," << b.origin[2] << ")..("
-        //          << b.dims[0] << "," << b.dims[1] << "," << b.dims[2] << ")" << std::endl;
+        std::cerr << "IN:  " << index << " " << b.owningrank << " " << b.level << " "
+                  << "(" << b.origin[0] << "," << b.origin[1] << "," << b.origin[2] << ")..("
+                  << b.dims[0] << "," << b.dims[1] << "," << b.dims[2] << ")" << std::endl;
         boxes.push_back(b);
         index++;
       }
@@ -164,12 +166,12 @@ int main(int argc, char **argv)
         {
           vec3i bo = b.origin;
           vec3i bd = b.dims;
-          vec3f bx0 = ((vec3f(bo)+vec3f(0.0))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
-          vec3f bx1 = ((vec3f(bo+bd)-vec3f(0.0))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
+          vec3f bx0 = ((vec3f(bo)+vec3f(0.f))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
+          vec3f bx1 = ((vec3f(bo+bd)-vec3f(0.f))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
           wombatRegions.push_back(box3f(vec3f(bx0.x,bx0.y,bx0.z),vec3f(bx1.x,bx1.y,bx1.z)));
-          //std::cerr << "OUT: " << index << " " << b.owningrank << " " << b.level << " "
-          //          << bo << ".." << bd << "->"
-          //          << bx0 << "," << bx1 << std::endl;
+          std::cerr << "OUT: " << index << " " << b.owningrank << " " << b.level << " "
+                    << bo << ".." << bd << "->"
+                    << bx0 << "," << bx1 << std::endl;
         }
       }
       brick.bounds = wombatRegions;
@@ -208,7 +210,12 @@ int main(int argc, char **argv)
 
     // create OSPRay renderer
     cpp::Renderer renderer("mpiRaycast");
-    //renderer.setParam("volumeSamplingRate", 20.0f);
+    const char *samples = getenv("DDMSAMPLES");
+    float sampleRate = 1.0;
+    if (samples)
+      sampleRate = std::stof(std::string(samples));
+    std::cerr << "SAMPLE RATE IS " << sampleRate << std::endl;
+    renderer.setParam("volumeSamplingRate", sampleRate);
 
     // create and setup an ambient light
     cpp::Light ambientLight("ambient");

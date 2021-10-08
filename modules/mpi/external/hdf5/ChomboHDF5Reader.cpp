@@ -669,7 +669,7 @@ void Reader::zeroSingleBlockData(int a_levelBlockIdx, int a_level)
   hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x + 1)
       * (block.upper.y - block.lower.y + 1)
       * (block.upper.z - block.lower.z + 1));
-  m_blockDataVector[globalBlockIdx] = std::vector<float>(numCells, 0.f);
+  m_blockDataVector[globalBlockIdx] = std::vector<float>(numCells, NAN);
 }
 
 void Reader::createVolume()
