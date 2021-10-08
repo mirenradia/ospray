@@ -123,13 +123,13 @@ ospray_create_mpi_tutorial(ospMPIDistribTutorialAMR
 ospray_sign_target(ospMPIDistribTutorialVolumeAMR)
 
 if (OSPRAY_MPI_USE_HDF5)
-  ospray_create_mpi_hdf5_tutorial(ospMPIDistribTutorialVolumeHDF5
+  ospray_create_mpi_hdf5_tutorial(ospMPIDistribTutorialAMRHDF5
     wombat.cxx
     rawToAMR.cpp
-    ospMPIDistribTutorialVolumeHDF5.cpp
+    ospMPIDistribTutorialAMRHDF5.cpp
   )
 
-  ospray_sign_target(ospMPIDistribTutorialVolumeHDF5)
+  ospray_sign_target(ospMPIDistribTutorialAMRHDF5)
 endif()
 
 
