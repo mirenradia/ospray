@@ -39,7 +39,10 @@ struct VolumeBrick
 static box3f worldBounds;
 
 // Generate the rank's local volume brick
-VolumeBrick makeLocalVolume(const int mpiRank, const int mpiWorldSize);
+VolumeBrick makeGravitySpheresVolume(const int mpiRank, const int mpiWorldSize);
+VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize);
+
+bool trustInWombat = true;
 
 int main(int argc, char **argv)
 {
@@ -59,6 +62,21 @@ int main(int argc, char **argv)
   MPI_Comm_size(MPI_COMM_WORLD, &mpiWorldSize);
 
   std::cout << "OSPRay rank " << mpiRank << "/" << mpiWorldSize << "\n";
+
+  int scene = 0;
+  for (int i = 0; i < argc; ++i)
+  {
+    if (!strcmp(argv[i], "-noWombatNoCry")) {
+      std::cout << "No Wombat!" << std::endl;
+      trustInWombat = false;
+    }
+    if (!strcmp(argv[i], "-GS")) {
+      scene = 0;
+    }
+    if (!strcmp(argv[i], "-Simple1")) {
+      scene = 1;
+    }
+  }
 
   // load the MPI module, and select the MPI distributed device. Here we
   // do not call ospInit, as we want to explicitly pick the distributed
@@ -83,7 +101,15 @@ int main(int argc, char **argv)
 
     // all ranks specify the same rendering parameters, with the exception of
     // the data to be rendered, which is distributed among the ranks
-    VolumeBrick brick = makeLocalVolume(mpiRank, mpiWorldSize);
+    VolumeBrick brick;
+    switch (scene) {
+    case 0:
+    default:
+        brick = makeGravitySpheresVolume(mpiRank, mpiWorldSize);
+        break;
+    case 1:
+        brick = makeSimpleVolume1(mpiRank, mpiWorldSize);
+    }
 
     // create the "world" model which will contain all of our geometries
     cpp::World world;
@@ -136,39 +162,9 @@ int main(int argc, char **argv)
   return 0;
 }
 
-bool computeDivisor(int x, int &divisor)
+VolumeBrick makeGravitySpheresVolume(const int mpiRank, const int mpiWorldSize)
 {
-  int upperBound = std::sqrt(x);
-  for (int i = 2; i <= upperBound; ++i) {
-    if (x % i == 0) {
-      divisor = i;
-      return true;
-    }
-  }
-  return false;
-}
-
-// Compute an X x Y x Z grid to have 'num' grid cells,
-// only gives a nice grid for numbers with even factors since
-// we don't search for factors of the number, we just try dividing by two
-vec3i computeGrid(int num)
-{
-  vec3i grid(1);
-  int axis = 0;
-  int divisor = 0;
-  while (computeDivisor(num, divisor)) {
-    grid[axis] *= divisor;
-    num /= divisor;
-    axis = (axis + 1) % 3;
-  }
-  if (num != 1) {
-    grid[axis] *= num;
-  }
-  return grid;
-}
-
-VolumeBrick makeLocalVolume(const int mpiRank, const int mpiWorldSize)
-{
+  if (!mpiRank) std::cerr << "MAKING GRAVITY SPHERES VOLUME #1" << std::endl;
   VolumeBrick brick;
 
   GravitySpheres gs(true, mpiRank, mpiWorldSize);
@@ -176,10 +172,9 @@ VolumeBrick makeLocalVolume(const int mpiRank, const int mpiWorldSize)
   gs.getRegions(myregions);
   brick.brick = gs.getVolume();
 
-  bool trustinwombat = true;
   if (mpiWorldSize == 1)
       brick.bounds.push_back(box3f(vec3f(-1.f, -1.f, -1.f), vec3f(1.f, 1.f, 1.f)));
-  else if (!trustinwombat) {
+  else if (!trustInWombat) {
       float x0 = (2.0*mpiRank)/mpiWorldSize - 1.0;
       float x1 = (2.0*(mpiRank+1))/mpiWorldSize - 1.0;
       brick.bounds.push_back(box3f(vec3f(x0, -1.f, -1.f), vec3f(x1, 1.f, 1.f)));
@@ -208,6 +203,89 @@ VolumeBrick makeLocalVolume(const int mpiRank, const int mpiWorldSize)
 
   brick.instance = cpp::Instance(brick.group);
   brick.instance.commit();
+
+  return brick;
+}
+
+VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize)
+{
+  if (!mpiRank) std::cerr << "MAKING SIMPLE VOLUME #1" << std::endl;
+
+  cpp::Volume volume("amr");
+
+  std::vector<std::vector<float>> perBlockData;
+  std::vector<box3i> perBlockBounds;
+  std::vector<box3f> localPerBlockBounds;
+  std::vector<int> perBlockLevels;
+  std::vector<int> perBlockOwners;
+  std::vector<float> perLevelCellWidths;
+
+  int blockDims = 16;
+  int numlevels = 1;
+  for (int level = 0; level < numlevels; level++) {
+    for (int r = 0; r < mpiWorldSize; r++) {
+      std::cerr << r << std::endl;
+      float v = r;
+      std::vector<float> data(blockDims*blockDims*blockDims, v);
+      perBlockData.push_back(data);
+      std::cerr << "data " << data.size() << std::endl;
+
+      box3i box;
+      box.lower = vec3i(r*blockDims,0,0);
+      box.upper = vec3i((r+1)*blockDims-1,blockDims-1,blockDims-1);
+      std::cerr << "box " << box << std::endl;
+      perBlockBounds.push_back(box);
+
+      perBlockLevels.push_back(level);
+
+      perBlockOwners.push_back(r);
+    }
+    float w = 1.f / powf(2, level);
+    std::cerr << "L " << level << " w " << w << std::endl;
+    perLevelCellWidths.push_back(w);
+  }
+
+  std::vector<cpp::CopiedData> allBlockData;
+  for (const std::vector<float> &bd : perBlockData)
+    allBlockData.emplace_back(bd.data(), OSP_FLOAT, bd.size());
+
+  worldBounds = box3f(vec3f(0.f), vec3f(mpiWorldSize*blockDims, blockDims, blockDims));
+  volume.setParam("gridOrigin", vec3f(0.f));
+  volume.setParam("gridSpacing", vec3f(1.f));
+  volume.setParam("block.data", cpp::CopiedData(allBlockData));
+  volume.setParam("block.bounds", cpp::CopiedData(perBlockBounds));
+  volume.setParam("block.level", cpp::CopiedData(perBlockLevels));
+  volume.setParam("cellWidth", cpp::CopiedData(perLevelCellWidths));
+  volume.commit();
+
+  cpp::VolumetricModel model = cpp::VolumetricModel(volume);
+  cpp::TransferFunction tfn("piecewiseLinear");
+  std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
+  std::vector<float> opacities = {0.25f, 1.0f};
+  tfn.setParam("color", cpp::CopiedData(colors));
+  tfn.setParam("opacity", cpp::CopiedData(opacities));
+  vec2f valueRange = vec2f(0, mpiWorldSize);
+  tfn.setParam("valueRange", valueRange);
+  tfn.commit();
+  model.setParam("transferFunction", tfn);
+  model.setParam("samplingRate", 0.01f);
+  model.commit();
+
+  cpp::Group group = cpp::Group();
+  group.setParam("volume", cpp::CopiedData(model));
+  group.commit();
+
+  cpp::Instance instance = cpp::Instance(group);
+  instance.commit();
+
+  VolumeBrick brick;
+  brick.brick = volume;
+  brick.model = model;
+  brick.group = group;
+  brick.instance = instance;
+  localPerBlockBounds.push_back(worldBounds); //todo - correct for wombat
+  brick.bounds = localPerBlockBounds;
+  brick.ghostBounds = worldBounds;
 
   return brick;
 }
