@@ -71,10 +71,6 @@ int main(int argc, char **argv)
   int fakeWorldSize = 1;
   for (int i = 0; i < argc; ++i)
   {
-    if (!strcmp(argv[i], "-noWombatNoCry")) {
-      std::cout << "No Wombat!" << std::endl;
-      trustInWombat = false;
-    }
     if (!strcmp(argv[i], "-GS")) {
       scene = 0;
     }
@@ -91,6 +87,8 @@ int main(int argc, char **argv)
 
   }
 
+  const char *noWombatEnv = getenv("NOWOMBAT");
+  if (noWombatEnv) trustInWombat = false;
   const char *rankToDebugfEnv = getenv("RANKTODEBUGF");
   if (rankToDebugfEnv) rankToDebugf = std::stoi(std::string(rankToDebugfEnv));
 
@@ -250,9 +248,9 @@ VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize)
   const char *numLevelsEnv = getenv("NUMLEVELS");
   if (numLevelsEnv) numLevels = std::stoi(std::string(numLevelsEnv));
 
-  int remoteValueChoice = 0;
-  const char *remoteValueChoiceEnv = getenv("REMOTEVALUECHOICE");
-  if (remoteValueChoiceEnv) remoteValueChoice = std::stoi(std::string(remoteValueChoiceEnv));
+  wombat::remoteValueMode rvm = wombat::DATA;
+  float remoteValue = 0.0;
+  wombat::getRemoteValue(rvm, remoteValue);
 
   int blockDims = baseRes*mpiWorldSize;
   for (int level = 0; level < numLevels; level++) {
@@ -268,9 +266,22 @@ VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize)
       if (mpiRank==rankToDebugf) std::cerr << "owner " << owner << std::endl;
       float v = owner+1;
       if (owner != mpiRank) {
-        if (remoteValueChoice == 1) v = 0.0;
-        if (remoteValueChoice == 2) v = NAN;
-        if (remoteValueChoice == 3) v = mpiRank+1;
+        switch (rvm) {
+        case wombat::DATA:
+            v = owner+1;
+            break;
+        case wombat::RANK:
+            v = mpiRank + 1;
+            break;
+        case wombat::ANAN:
+            v = NAN;
+            break;
+        case wombat::ANUMBER:
+            v = remoteValue;
+            break;
+        default:
+            break;
+        }
       }
       if (mpiRank==rankToDebugf) std::cerr << "value " << v << std::endl;
       std::vector<float> data(blockDims*blockDims*blockDims, v);
@@ -308,6 +319,8 @@ VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize)
   volume.setParam("block.bounds", cpp::CopiedData(perBlockExtents));
   volume.setParam("block.level", cpp::CopiedData(perBlockLevels));
   volume.setParam("cellWidth", cpp::CopiedData(perLevelCellWidths));
+  volume.setParam("background", 0.0);
+  volume.setParam("method", OSP_AMR_CURRENT);
   volume.commit();
 
   if (trustInWombat) {
@@ -380,19 +393,22 @@ VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize)
 
   cpp::VolumetricModel model = cpp::VolumetricModel(volume);
   cpp::TransferFunction tfn("piecewiseLinear");
-  std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
+  std::vector<vec3f> colors;
+  colors.push_back(vec3f(0.f, 1.f, 0.f));
   std::vector<float> opacities;
-  opacities.push_back(0.0);
-  for (int i = 0; i < mpiWorldSize; i++)
-    opacities.push_back(0.95);
-
+  opacities.push_back(1.0);
+  int maxcolor = mpiWorldSize+1;
+  for (int i = 0; i < maxcolor; i++) {
+    colors.push_back(vec3f((float)i/maxcolor,0.0,1.0-(float)i/maxcolor));
+    opacities.push_back(0.80);
+  }
   tfn.setParam("color", cpp::CopiedData(colors));
   tfn.setParam("opacity", cpp::CopiedData(opacities));
-  vec2f valueRange = vec2f(0, mpiWorldSize+1);
+  vec2f valueRange = vec2f(0, maxcolor);
   tfn.setParam("valueRange", valueRange);
   tfn.commit();
   model.setParam("transferFunction", tfn);
-  model.setParam("samplingRate", 0.01f);
+  model.setParam("samplingRate", 20.5f);
   model.commit();
 
   cpp::Group group = cpp::Group();
@@ -435,10 +451,6 @@ VolumeBrick makeFakeMPIVolume(const int mpiWorldSize)
   int numLevels = 2;
   const char *numLevelsEnv = getenv("NUMLEVELS");
   if (numLevelsEnv) numLevels = std::stoi(std::string(numLevelsEnv));
-
-  int remoteValueChoice = 0;
-  const char *remoteValueChoiceEnv = getenv("REMOTEVALUECHOICE");
-  if (remoteValueChoiceEnv) remoteValueChoice = std::stoi(std::string(remoteValueChoiceEnv));
 
   int blockDims = baseRes*mpiWorldSize;
   for (int level = 0; level < numLevels; level++) {
@@ -490,15 +502,19 @@ VolumeBrick makeFakeMPIVolume(const int mpiWorldSize)
 
   cpp::VolumetricModel model = cpp::VolumetricModel(volume);
   cpp::TransferFunction tfn("piecewiseLinear");
-  std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
-  std::vector<float> opacities;
-  opacities.push_back(0.0);
-  for (int i = 0; i < mpiWorldSize; i++)
-    opacities.push_back(0.95);
 
+  std::vector<vec3f> colors;
+  colors.push_back(vec3f(0.f, 1.f, 0.f));
+  std::vector<float> opacities;
+  opacities.push_back(1.0);
+  int maxcolor = mpiWorldSize+1;
+  for (int i = 0; i < maxcolor; i++) {
+    colors.push_back(vec3f((float)i/maxcolor,0.0,1.0-(float)i/maxcolor));
+    opacities.push_back(0.95);
+  }
   tfn.setParam("color", cpp::CopiedData(colors));
   tfn.setParam("opacity", cpp::CopiedData(opacities));
-  vec2f valueRange = vec2f(0, mpiWorldSize+1);
+  vec2f valueRange = vec2f(0, maxcolor);
   tfn.setParam("valueRange", valueRange);
   tfn.commit();
   model.setParam("transferFunction", tfn);

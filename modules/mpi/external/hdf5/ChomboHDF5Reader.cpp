@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include "wombat.h"
+
+extern int fakeWorldSize;
+
 namespace ChomboHDF5 {
 
 // Handle //////////////////////////////////////////////////////////////////////
@@ -336,7 +340,10 @@ void Reader::readMainHeader()
         "File: " + m_handle.getFilename() + " does not contain num_levels.");
   }
   m_numLevels = mainHeader.m_int["num_levels"];
-  // std::cout << "num_levels = " << m_numLevels << std::endl;
+  std::cout << "num_levels = " << m_numLevels << std::endl;
+  const char *numLevelsEnv = getenv("NUMLEVELS");
+  if (numLevelsEnv) m_numLevels = std::min(std::stoi(std::string(numLevelsEnv)), m_numLevels);
+  std::cout << "but just levels = " << m_numLevels << std::endl;
 
   if (mainHeader.m_int.find("num_components") == mainHeader.m_int.end()) {
     throw std::runtime_error("File: " + m_handle.getFilename()
@@ -575,6 +582,14 @@ int Reader::readBlockData(const std::string &a_compName)
     for (int iblock = 0; iblock < m_numBlocksPerLevel[ilev]; ++iblock) {
       // first read in the data if it's owned by this rank
       if (m_mpiRank == m_rankDataOwner[iblock]) {
+        std::cerr << m_mpiRank << " " << ilev << ":" << iblock << "/" << m_numBlocksPerLevel[ilev] << " read" << std::endl;
+#if 0
+        int rankdata = m_mpiRank+1;
+        if (fakeWorldSize > -1)
+          rankdata = iblock%fakeWorldSize+1;
+        std::cerr << iblock << " " << rankdata << std::endl;
+        setSingleBlockData(iblock, ilev, rankdata);
+#else
         err = readSingleBlockData(
             iblock, ilev, comp, level_dataset_id, level_dataspace_id);
         if (err < 0) {
@@ -582,13 +597,33 @@ int Reader::readBlockData(const std::string &a_compName)
           H5Dclose(level_dataset_id);
           return err;
         }
-
+#endif
       } else {
-        // set data for blocks not owned by this rank to nan as OSPRay
-        // cannot currently handle non-existent data
-        setSingleBlockData(iblock, ilev, NAN);
-      }
 
+        wombat::remoteValueMode rvm = wombat::DATA;
+        float remoteValue = 0.0;
+        wombat::getRemoteValue(rvm, remoteValue);
+        switch (rvm) {
+        case wombat::DATA:
+            err = readSingleBlockData(
+                iblock, ilev, comp, level_dataset_id, level_dataspace_id);
+            if (err < 0) {
+              H5Sclose(level_dataspace_id);
+              H5Dclose(level_dataset_id);
+              return err;
+            }
+            break;
+        case wombat::RANK:
+            remoteValue = m_mpiRank + 1;
+            setSingleBlockData(iblock, ilev, remoteValue);
+            break;
+        case wombat::ANAN:
+            setSingleBlockData(iblock, ilev, NAN);
+            break;
+        default:
+            setSingleBlockData(iblock, ilev, remoteValue);
+        }
+      }
       // now adjust the block bounds for ghosts
       int globalBlockIdx = levelToGlobalBlockIdx(iblock, ilev);
       const box3i &block = m_blockBounds[globalBlockIdx];

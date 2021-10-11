@@ -33,4 +33,8 @@ bool convexify(const std::vector<Level> levels, const std::vector<Box> inBoxes, 
 //within parent level if they fit within it.
 void geneology(const std::vector<Level> levels, std::vector<Box> &inBoxes, int rank);
 
+//temporary, just a useful place for debugging in both examples
+enum remoteValueMode { DATA, RANK, ANAN, ANUMBER };
+void getRemoteValue(remoteValueMode &, float &);
 }
+

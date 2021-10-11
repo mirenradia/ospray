@@ -164,4 +164,21 @@ void geneology(const std::vector<Level> _levels, std::vector<Box> &inBoxes, int 
 
 }
 
+void getRemoteValue(remoteValueMode &rvm, float &rv) {
+  const char *remoteValueModeEnv = getenv("REMOTEVALUEMODE");
+  if (remoteValueModeEnv) {
+      auto rvcString = std::string(remoteValueModeEnv);
+      if (rvcString == "DATA") {
+        rvm = DATA;
+      } else if (rvcString == "RANK") {
+        rvm = RANK;
+      } else if (rvcString == "NAN") {
+        rvm = ANAN;
+      } else {
+        rvm = ANUMBER;
+        rv = std::atof(rvcString.c_str());
+      }
+  }
+}
+
 }
