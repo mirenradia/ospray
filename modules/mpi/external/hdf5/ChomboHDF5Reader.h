@@ -116,13 +116,20 @@ class Reader
   rkcommon::math::box3f getDomainBounds();
 
   // returns the boundaries of the regions for which the data is on this rank
+  // note that this does NOT contain ghosts
   const std::vector<rkcommon::math::box3f> &getMyRegions();
 
   // returns refinements per level
   const std::vector<int> &getMyRefRatios();
 
-  // returns index space bounds of all regions
+  // returns the bounds of the blocks without ghosts
   const std::vector<rkcommon::math::box3i> &getBlockBounds();
+
+  // returns the bounds of the blocks with ghosts
+  const std::vector<rkcommon::math::box3i> &getGhostedBlockBounds();
+
+  // returns the number of ghost cells on each level
+  const std::vector<rkcommon::math::vec3i> &getNumGhosts();
 
   // returns refinements per level
   const std::vector<int> &getRankDataOwner();
@@ -147,10 +154,14 @@ class Reader
       m_refRatios; // the ratio of a level's resolution to the next coarser one
   std::vector<float> m_cellWidths; // the width of a single cell on each level
   std::vector<rkcommon::math::box3i>
-      m_blockBounds; // all the blocks on every level
+      m_blockBounds; // all the blocks on every level (without ghosts)
   std::vector<int> m_blockLevels; // which level each block belongs to
   std::vector<int> m_numBlocksPerLevel; // number of blocks on each level
   int m_totalNumBlocks;
+  std::vector<rkcommon::math::vec3i>
+      m_numGhosts; // the number of ghosts in each direction on each level
+  std::vector<rkcommon::math::box3i>
+      m_ghostedBlockBounds; // all blocks on every level (with ghosts)
   std::vector<int> m_rankDataOwner; // the MPI rank on which the data for each
                                     // block will be on
   std::vector<rkcommon::math::box3f>
@@ -175,7 +186,8 @@ class Reader
 
   void setRankDataOwner();
 
-  // read all block data
+  // read all block data and also ghost information (so sets
+  // m_ghostedBlockBounds)
   int readBlockData(const std::string &a_compName);
 
   // reads in the data for a single block on a given level
@@ -185,8 +197,8 @@ class Reader
       hid_t a_level_dataset_id,
       hid_t a_level_dataspace_id);
 
-  // sets the block data to 0 for blocks owned by other ranks
-  void zeroSingleBlockData(int a_levelBlockIdx, int a_level);
+  // sets the block data to a specified value for blocks owned by other ranks
+  void setSingleBlockData(int a_levelBlockIdx, int a_level, float a_value);
 
   // create OSPRay AMR volume
   void createVolume();

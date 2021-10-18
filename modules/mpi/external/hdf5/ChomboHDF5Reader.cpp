@@ -399,7 +399,8 @@ void Reader::readLevelHeaders()
       }
       m_domainBounds_int = levelHeader.m_box3i["prob_domain"];
       m_domainBounds.lower = m_domainBounds_int.lower * m_cellWidths[ilev];
-      m_domainBounds.upper = (m_domainBounds_int.upper + 1) * m_cellWidths[ilev];
+      m_domainBounds.upper =
+          (m_domainBounds_int.upper + 1) * m_cellWidths[ilev];
     }
   }
   m_levelHeadersRead = true;
@@ -530,6 +531,8 @@ int Reader::readBlockData(const std::string &a_compName)
   // setRankDataOwner();
 
   m_blockDataVector.resize(m_totalNumBlocks);
+  m_numGhosts.resize(m_numLevels);
+  m_ghostedBlockBounds.resize(m_totalNumBlocks);
   for (int ilev = 0; ilev < m_numLevels; ++ilev) {
     m_handle.setGroupToLevel(ilev);
 
@@ -544,6 +547,7 @@ int Reader::readBlockData(const std::string &a_compName)
     levelDataHeader.readFromFile(m_handle);
     int numComps = levelDataHeader.m_int["comps"];
     vec3i ghostVec = levelDataHeader.m_vec3i["outputGhost"];
+    m_numGhosts[ilev] = ghostVec;
     if (numComps != m_numComps) {
       std::cerr << "Number of components on level " << ilev
                 << " differs to number in main header";
@@ -551,11 +555,6 @@ int Reader::readBlockData(const std::string &a_compName)
     if (comp > numComps) {
       throw std::runtime_error(a_compName + " does not exist on level "
           + std::to_string(ilev) + " in " + m_handle.getFilename());
-    }
-    if (ghostVec.sum() != 0) {
-      throw std::runtime_error("Data on level " + std::to_string(ilev) + " in "
-          + m_handle.getFilename()
-          + " contains ghosts which this reader does not support.");
     }
 
     m_handle.setGroupToLevel(ilev);
@@ -574,6 +573,7 @@ int Reader::readBlockData(const std::string &a_compName)
     }
 
     for (int iblock = 0; iblock < m_numBlocksPerLevel[ilev]; ++iblock) {
+      // first read in the data if it's owned by this rank
       if (m_mpiRank == m_rankDataOwner[iblock]) {
         err = readSingleBlockData(
             iblock, ilev, comp, level_dataset_id, level_dataspace_id);
@@ -584,10 +584,17 @@ int Reader::readBlockData(const std::string &a_compName)
         }
 
       } else {
-        // set data for blocks not owned by this rank to 0 as OSPRay cannot
-        // currently handle non-existent data
-        zeroSingleBlockData(iblock, ilev);
+        // set data for blocks not owned by this rank to nan as OSPRay
+        // cannot currently handle non-existent data
+        setSingleBlockData(iblock, ilev, NAN);
       }
+
+      // now adjust the block bounds for ghosts
+      int globalBlockIdx = levelToGlobalBlockIdx(iblock, ilev);
+      const box3i &block = m_blockBounds[globalBlockIdx];
+      box3i &ghostedBlock = m_ghostedBlockBounds[globalBlockIdx];
+      ghostedBlock.lower = block.lower - m_numGhosts[ilev];
+      ghostedBlock.upper = block.upper + m_numGhosts[ilev];
     }
 
     H5Sclose(level_dataspace_id);
@@ -617,15 +624,17 @@ int Reader::readSingleBlockData(int a_levelBlockIdx,
   for (int iblock = thisLevelFirstBlockIdx; iblock < globalBlockIdx; iblock++) {
     // assume there are no ghosts in the file
     box3i &block = m_blockBounds[iblock];
-    hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x + 1)
-        * (block.upper.y - block.lower.y + 1)
-        * (block.upper.z - block.lower.z + 1));
+    hsize_t numCells = static_cast<hsize_t>(
+        (block.upper.x - block.lower.x + 1 + 2 * m_numGhosts[a_level][0])
+        * (block.upper.y - block.lower.y + 1 + 2 * m_numGhosts[a_level][1])
+        * (block.upper.z - block.lower.z + 1 + 2 * m_numGhosts[a_level][2]));
     offset += numCells * m_numComps;
   }
   box3i &block = m_blockBounds[globalBlockIdx];
-  hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x + 1)
-      * (block.upper.y - block.lower.y + 1)
-      * (block.upper.z - block.lower.z + 1));
+  hsize_t numCells = static_cast<hsize_t>(
+      (block.upper.x - block.lower.x + 1 + 2 * m_numGhosts[a_level][0])
+      * (block.upper.y - block.lower.y + 1 + 2 * m_numGhosts[a_level][1])
+      * (block.upper.z - block.lower.z + 1 + 2 * m_numGhosts[a_level][2]));
   offset += numCells * a_comp;
 
   // select data to read
@@ -647,30 +656,29 @@ int Reader::readSingleBlockData(int a_levelBlockIdx,
       H5P_DEFAULT,
       blockData.data());
   /*
-if ((m_mpiRank == 0) && (a_level == m_numLevels - 1)
-  && (a_levelBlockIdx == 0)) {
-std::cout << "*****************************\n";
-std::cout << "Flattened first box on finest level\n";
-for (float value : blockData) {
-  std::cout << value << "\n";
-}
-std::cout << "numCells = " << numCells << "\n";
-std::cout << "******************************" << std::endl;
-;
-}
+    if ((m_mpiRank == 0) && (a_level == m_numLevels - 1)
+        && (a_levelBlockIdx == m_numBlocksPerLevel[a_level] - 1)) {
+      std::cout << "*****************************\n";
+      std::cout << "Flattened last box on finest level\n";
+      for (float value : blockData) {
+        std::cout << value << "\n";
+      }
+      std::cout << "numCells = " << numCells << "\n";
+      std::cout << "******************************" << std::endl;
+  }
 */
   H5Sclose(memDataspace);
   return err;
 }
 
-void Reader::zeroSingleBlockData(int a_levelBlockIdx, int a_level)
+void Reader::setSingleBlockData(int a_levelBlockIdx, int a_level, float a_value)
 {
   int globalBlockIdx = levelToGlobalBlockIdx(a_levelBlockIdx, a_level);
   box3i &block = m_blockBounds[globalBlockIdx];
   hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x + 1)
       * (block.upper.y - block.lower.y + 1)
       * (block.upper.z - block.lower.z + 1));
-  m_blockDataVector[globalBlockIdx] = std::vector<float>(numCells, NAN);
+  m_blockDataVector[globalBlockIdx] = std::vector<float>(numCells, a_value);
 }
 
 void Reader::createVolume()
@@ -690,11 +698,12 @@ void Reader::createVolume()
   }
 
   ospray::cpp::Volume volume("amr");
-  // Chombo volumes have their origin at (0,0,0)
-  volume.setParam("gridOrigin", vec3f(0.f));
+  // Chombo volumes have their origin at (0,0,0) but need to adjust for ghosts
+  volume.setParam("gridOrigin", vec3f(-m_numGhosts[0] * m_cellWidths[0]));
   volume.setParam("gridSpacing", vec3f(m_cellWidths[0]));
   volume.setParam("block.data", ospray::cpp::CopiedData(blockData));
-  volume.setParam("block.bounds", ospray::cpp::CopiedData(m_blockBounds));
+  volume.setParam(
+      "block.bounds", ospray::cpp::CopiedData(m_ghostedBlockBounds));
   volume.setParam("block.level", ospray::cpp::CopiedData(m_blockLevels));
   volume.setParam("cellWidth", ospray::cpp::CopiedData(m_cellWidths));
 
@@ -772,6 +781,16 @@ const std::vector<int> &Reader::getMyRefRatios()
 const std::vector<box3i> &Reader::getBlockBounds()
 {
   return m_blockBounds;
+}
+
+const std::vector<box3i> &Reader::getGhostedBlockBounds()
+{
+  return m_ghostedBlockBounds;
+}
+
+const std::vector<vec3i> &Reader::getNumGhosts()
+{
+  return m_numGhosts;
 }
 
 const std::vector<int> &Reader::getRankDataOwner()
