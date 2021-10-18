@@ -14,6 +14,11 @@ typedef std::pair<int, Box> BoxWithID;
 
 bool subdivide(Box box, std::vector<Box> children, int axis, std::vector<Box> &convexBoxes) {
 
+  if (box.dims[0] <= 2 && box.dims[1] <= 2 && box.dims[2] <= 2) {
+    //an optimization, simply ignoring tiny boxes speeds it up _a lot_
+    //return false;
+  }
+
   if (children.size() == 0) {
     //no children therefore convex
     //std::cerr << "no children" << std::endl;
@@ -21,12 +26,17 @@ bool subdivide(Box box, std::vector<Box> children, int axis, std::vector<Box> &c
     return true;
   }
 
-  //std::cerr << "DIMS " << box.dims[0] << "," << box.dims[1] << "," << box.dims[2] << std::endl;
-  if (box.dims[0] == box.dims[1] == box.dims[1] == 0) {
-    //std::cerr << "huh?" << std::endl; //I think this indicates a bug in dims, like an off by one or something
-    convexBoxes.push_back(box);
+  if (box.dims[0] == 0 || box.dims[1] == 0 || box.dims[2] == 0) {
+    //std::cerr << "huh?" << std::endl; //May be a bug?
+    return false;
+  }
+  if (box.dims[0] <= 1 && box.dims[1] <= 1 && box.dims[2] <= 1) {
+    //convexBoxes.push_back(box);
+    //std::cerr << "hey?" << std::endl; //optimization, ignore tiny boxes that are fully covered. I think fully covered large boxes eventually get here too.
     return true;
   }
+
+  //std::cerr << "ORG " << box.origin[0] << "," << box.origin[1] << "," << box.origin[2] << ", DIMS " << box.dims[0] << "," << box.dims[1] << "," << box.dims[2] << std::endl;
 
   Box lhalf = box;
   lhalf.origin[axis] = box.origin[axis];
@@ -35,7 +45,7 @@ bool subdivide(Box box, std::vector<Box> children, int axis, std::vector<Box> &c
   rhalf.origin[axis] = box.origin[axis]+(box.dims[axis] / 2);
   rhalf.dims[axis] = box.dims[axis] - (box.dims[axis] / 2); //integer division, so rounding up
 
-  int refinement = levels[box.level].refinement[axis];
+  int refinement = levels[box.level].refinement[axis]; //TODO fix this, assuming chombo 2 here
   int leftedge = box.origin[axis]*refinement;
   int rightedge = leftedge + box.dims[axis]*refinement;
   int middle = (leftedge + rightedge) / 2;
@@ -48,15 +58,14 @@ bool subdivide(Box box, std::vector<Box> children, int axis, std::vector<Box> &c
      Box child = children[c];
      int cleftedge = child.origin[axis];
      int crightedge = cleftedge + child.dims[axis];
-     //std::cerr << "CL " << cleftedge << " CR " << crightedge << std::endl;
      if (crightedge <= middle) {
-         //std::cerr << "L" << std::endl;
-        leftChildren.push_back(child);
+       //std::cerr << "CL " << cleftedge << " CR " << crightedge << "-> L" << std::endl;
+       leftChildren.push_back(child);
      } else if (cleftedge >= middle) {
-         //std::cerr << "R" << std::endl;
-        rightChildren.push_back(child);
+       //std::cerr << "CL " << cleftedge << " CR " << crightedge << "-> R" << std::endl;
+       rightChildren.push_back(child);
      } else {
-       //std::cerr << "B" << std::endl;
+       //std::cerr << "CL " << cleftedge << " CR " << crightedge << "-> B" << std::endl;
        leftChildren.push_back(child);
        rightChildren.push_back(child);
      }
@@ -88,7 +97,7 @@ bool convexify(const std::vector<Level> _levels, const std::vector<Box> inBoxes,
            children.push_back(inBoxes[c]);
          }
        }
-      //std::cerr << "box " << b << " has " << children.size() << " children" << std::endl;
+      //std::cerr << "boxcar " << b << " has " << children.size() << " children" << std::endl;
       subdivide(boxesAtLevel[b].second, children, 0, convexBoxes);
     }
   }
@@ -110,28 +119,30 @@ void geneology(const std::vector<Level> _levels, std::vector<Box> &inBoxes, int 
   }
   //std::cerr << rank << " sorted " << sorted.size() << std::endl;
   inBoxes.clear();
-  vec3i vref{1,1,1};
   for (int l = 0; l < static_cast<int>(_levels.size())-1; ++l) {
+    vec3i vref{1,1,1};
     //std::cerr << "level " << l << std::endl;
     std::vector<BoxWithID> &currentLevel = sorted[l];
     std::vector<BoxWithID> &nextLevel = sorted[l+1];
     vref.x *= _levels[l].refinement[0];
     vref.y *= _levels[l].refinement[1];
     vref.z *= _levels[l].refinement[2];
+    //std::cerr << "VR IS " << vref << std::endl;
     for (int B = 0; B < static_cast<int>(currentLevel.size()); ++B) {
       Box p = currentLevel[B].second;
       vec3i px0 = vec3i{p.origin[0],p.origin[1],p.origin[2]}*vref;
-      vec3i px1 = px0 + vec3i{p.dims[0]+1,p.dims[1]+1,p.dims[2]+1}*vref;
-      //std::cerr << B << " " << px0 << "-" << px1 << std::endl;
+      vec3i px1 = px0 + vec3i{p.dims[0],p.dims[1],p.dims[2]}*vref;
+      //std::cerr << B << "," << currentLevel[B].first << " " << p.parent << " " << px0 << "-" << px1 << std::endl;
 
       for (int b = 0; b < static_cast<int>(nextLevel.size()); ++b) {
         Box c = nextLevel[b].second;
         vec3i bx0 = vec3i{c.origin[0],c.origin[1],c.origin[2]};
-        vec3i bx1 = bx0+vec3i{c.dims[0]+1,c.dims[1]+1,c.dims[2]+1};
+        vec3i bx1 = bx0+vec3i{c.dims[0],c.dims[1],c.dims[2]};
         if ( bx0.x >= px0.x && bx1.x <= px1.x &&
              bx0.y >= px0.y && bx1.y <= px1.y &&
              bx0.z >= px0.z && bx1.z <= px1.z) {
-          nextLevel[b].second.parent = B;
+          //std::cerr << " " << b << "," << nextLevel[b].first << " " << currentLevel[B].first << " " <<  bx0 << "-" << bx1 << std::endl;
+          nextLevel[b].second.parent = currentLevel[B].first;
         }
       }
       inBoxes.push_back(currentLevel[B].second);
@@ -143,13 +154,13 @@ void geneology(const std::vector<Level> _levels, std::vector<Box> &inBoxes, int 
     //std::cerr << rank << " " << b << std::endl;
     inBoxes.push_back(leafLevel[b].second);
   }
+
+  //std::cerr << " ownership" << std::endl;
+  //for (int B = 0; B < static_cast<int>(inBoxes.size()); ++B) {
+     //Box p = inBoxes[B];
+     //std::cerr << B << " " << p.level << /*" " << p.owningrank <<*/ " " << p.parent << " " << p.origin[0] << "," << p.origin[1] << "," << p.origin[2] << " " << p.dims[0] << "," << p.dims[1] << "," << p.dims[2] << std::endl;
+  //}
   //std::cerr << rank << " DONE" << std::endl;
-
-
-  for (int B = 0; B < static_cast<int>(inBoxes.size()); ++B) {
-     Box p = inBoxes[B];
-     //std::cerr << p.level << " " << p.owningrank << " " << p.parent << " " << p.origin[0] << "," << p.origin[1] << "," << p.origin[2] << " " << p.dims[0] << "," << p.dims[1] << "," << p.dims[2] << std::endl;
-  }
 
 }
 
