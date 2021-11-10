@@ -252,6 +252,10 @@ VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize)
   float remoteValue = 0.0;
   wombat::getRemoteValue(rvm, remoteValue);
 
+  bool ghosts = true;
+  const char *noGhostsEnv = getenv("NOGHOSTS");
+  if (noGhostsEnv) ghosts = false;
+
   int blockDims = baseRes*mpiWorldSize;
   for (int level = 0; level < numLevels; level++) {
     int numInnerBlocks = powf(mpiWorldSize, level+1);
@@ -262,10 +266,13 @@ VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize)
     for (int r = 0; r < numInnerBlocks; r++) {
       if (mpiRank==rankToDebugf) std::cerr << "blocknum " << r << std::endl;
       int owner = r%mpiWorldSize;
-
+      //add ghost blocks to solve between neighbords and parent children so that each rank has
+      //something to interpolate with across edges, otherwise we get gaps
+      bool isNeighbor = (((r-1)%mpiWorldSize == mpiRank) || ((r+1)%mpiWorldSize == mpiRank)) && ghosts;
+      bool parentIsMine = (r/mpiWorldSize) % mpiWorldSize == mpiRank && ghosts;
       if (mpiRank==rankToDebugf) std::cerr << "owner " << owner << std::endl;
       float v = owner;
-      if (owner != mpiRank) {
+      if (owner != mpiRank && !isNeighbor && !parentIsMine) {
         switch (rvm) {
         case wombat::DATA:
             v = owner;
@@ -274,6 +281,7 @@ VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize)
             v = mpiRank;
             break;
         case wombat::ANAN:
+            if (mpiRank==rankToDebugf) std::cerr << r << " is not my problem" << std::endl;
             v = NAN;
             break;
         case wombat::ANUMBER:
@@ -283,6 +291,7 @@ VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize)
             break;
         }
       }
+
       if (mpiRank==rankToDebugf) std::cerr << "value " << v << std::endl;
       std::vector<float> data(blockDims*blockDims*blockDims, v);
       if (mpiRank==rankToDebugf) std::cerr << "data " << data.size() << " " << v << "'s" << std::endl;
@@ -401,8 +410,12 @@ VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize)
     opacities.push_back(0.2);
   } else {
     for (int i = 0; i < mpiWorldSize; i++) {
-      colors.push_back(vec3f((float)i/(mpiWorldSize-1),0.0,1.0-(float)i/(mpiWorldSize-1)));
-      opacities.push_back(0.2);
+      if (i == 0 && false) {
+       colors.push_back(vec3f(0,1,0)); opacities.push_back(1.0); //useful for visual debugging
+      } else {
+       colors.push_back(vec3f((float)i/(mpiWorldSize-1),0.0,1.0-(float)i/(mpiWorldSize-1)));
+       opacities.push_back(0.2);
+      }
     }
   }
   tfn.setParam("color", cpp::CopiedData(colors));
@@ -513,8 +526,12 @@ VolumeBrick makeFakeMPIVolume(const int mpiWorldSize)
     opacities.push_back(0.2);
   } else {
     for (int i = 0; i < mpiWorldSize; i++) {
-      colors.push_back(vec3f((float)i/(mpiWorldSize-1),0.0,1.0-(float)i/(mpiWorldSize-1)));
-      opacities.push_back(0.2);
+      if (i == 0 && false) {
+       colors.push_back(vec3f(0,1,0)); opacities.push_back(1.0); //useful for visual debugging
+      } else {
+       colors.push_back(vec3f((float)i/(mpiWorldSize-1),0.0,1.0-(float)i/(mpiWorldSize-1)));
+       opacities.push_back(0.2);
+      }
     }
   }
   tfn.setParam("color", cpp::CopiedData(colors));
