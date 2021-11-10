@@ -264,14 +264,14 @@ VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize)
       int owner = r%mpiWorldSize;
 
       if (mpiRank==rankToDebugf) std::cerr << "owner " << owner << std::endl;
-      float v = owner+1;
+      float v = owner;
       if (owner != mpiRank) {
         switch (rvm) {
         case wombat::DATA:
-            v = owner+1;
+            v = owner;
             break;
         case wombat::RANK:
-            v = mpiRank + 1;
+            v = mpiRank;
             break;
         case wombat::ANAN:
             v = NAN;
@@ -394,21 +394,24 @@ VolumeBrick makeSimpleVolume1(const int mpiRank, const int mpiWorldSize)
   cpp::VolumetricModel model = cpp::VolumetricModel(volume);
   cpp::TransferFunction tfn("piecewiseLinear");
   std::vector<vec3f> colors;
-  colors.push_back(vec3f(0.f, 1.f, 0.f));
   std::vector<float> opacities;
-  opacities.push_back(1.0);
-  int maxcolor = mpiWorldSize+1;
-  for (int i = 0; i < maxcolor; i++) {
-    colors.push_back(vec3f((float)i/maxcolor,0.0,1.0-(float)i/maxcolor));
-    opacities.push_back(0.80);
+  if (mpiWorldSize == 1)
+  {
+    colors.push_back(vec3f(0.0,0.0,1.0));
+    opacities.push_back(0.2);
+  } else {
+    for (int i = 0; i < mpiWorldSize; i++) {
+      colors.push_back(vec3f((float)i/(mpiWorldSize-1),0.0,1.0-(float)i/(mpiWorldSize-1)));
+      opacities.push_back(0.2);
+    }
   }
   tfn.setParam("color", cpp::CopiedData(colors));
   tfn.setParam("opacity", cpp::CopiedData(opacities));
-  vec2f valueRange = vec2f(0, maxcolor);
+  vec2f valueRange = vec2f(0, mpiWorldSize-1);
   tfn.setParam("valueRange", valueRange);
   tfn.commit();
   model.setParam("transferFunction", tfn);
-  model.setParam("samplingRate", 20.5f);
+  //model.setParam("samplingRate", 20.5f);
   model.commit();
 
   cpp::Group group = cpp::Group();
@@ -464,7 +467,7 @@ VolumeBrick makeFakeMPIVolume(const int mpiWorldSize)
       int owner = r%mpiWorldSize;
 
       if (rankToDebugf>-1) std::cerr << "owner " << owner << std::endl;
-      float v = owner+1;
+      float v = owner;
       if (rankToDebugf>-1) std::cerr << "value " << v << std::endl;
       std::vector<float> data(blockDims*blockDims*blockDims, v);
       if (rankToDebugf>-1) std::cerr << "data " << data.size() << " " << v << "'s" << std::endl;
@@ -502,23 +505,25 @@ VolumeBrick makeFakeMPIVolume(const int mpiWorldSize)
 
   cpp::VolumetricModel model = cpp::VolumetricModel(volume);
   cpp::TransferFunction tfn("piecewiseLinear");
-
   std::vector<vec3f> colors;
-  colors.push_back(vec3f(0.f, 1.f, 0.f));
   std::vector<float> opacities;
-  opacities.push_back(1.0);
-  int maxcolor = mpiWorldSize+1;
-  for (int i = 0; i < maxcolor; i++) {
-    colors.push_back(vec3f((float)i/maxcolor,0.0,1.0-(float)i/maxcolor));
-    opacities.push_back(0.95);
+  if (mpiWorldSize == 1)
+  {
+    colors.push_back(vec3f(0.0,0.0,1.0));
+    opacities.push_back(0.2);
+  } else {
+    for (int i = 0; i < mpiWorldSize; i++) {
+      colors.push_back(vec3f((float)i/(mpiWorldSize-1),0.0,1.0-(float)i/(mpiWorldSize-1)));
+      opacities.push_back(0.2);
+    }
   }
   tfn.setParam("color", cpp::CopiedData(colors));
   tfn.setParam("opacity", cpp::CopiedData(opacities));
-  vec2f valueRange = vec2f(0, maxcolor);
+  vec2f valueRange = vec2f(0, mpiWorldSize-1);
   tfn.setParam("valueRange", valueRange);
   tfn.commit();
   model.setParam("transferFunction", tfn);
-  model.setParam("samplingRate", 0.01f);
+  //model.setParam("samplingRate", 20.5f);
   model.commit();
 
   cpp::Group group = cpp::Group();
