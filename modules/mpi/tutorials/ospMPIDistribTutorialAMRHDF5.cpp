@@ -43,6 +43,7 @@ struct VolumeBrick
 static box3f worldBounds;
 
 int fakeWorldSize = -1;
+int rankToDebugf = -1;
 
 int main(int argc, char **argv)
 {
@@ -83,6 +84,9 @@ int main(int argc, char **argv)
   const char *noWombatEnv = getenv("NOWOMBAT");
   if (noWombatEnv) trustInWombat = false;
 
+  const char *rankToDebugfEnv = getenv("RANKTODEBUGF");
+  if (rankToDebugfEnv) rankToDebugf = std::stoi(std::string(rankToDebugfEnv));
+
   // load the MPI module, and select the MPI distributed device. Here we
   // do not call ospInit, as we want to explicitly pick the distributed
   // device. This can also be done by passing --osp:mpi-distributed when
@@ -113,7 +117,6 @@ int main(int argc, char **argv)
     ChomboHDF5::Reader hdf5reader(argv[1], mpiRank, mpiWorldSize, argv[2]);
 
 
-    usleep(500000*mpiRank); //quick hack to segregate rank debugfs
     std::cerr << "-----------------------------------" << std::endl;
     std::cerr << "RANK " << mpiRank << std::endl;
 
@@ -121,11 +124,11 @@ int main(int argc, char **argv)
     VolumeBrick brick;
     brick.brick = hdf5reader.getVolume();
     worldBounds = hdf5reader.getDomainBounds();
-    //for (auto g : hdf5reader.getNumGhosts())
-    //    std::cerr << g << std::endl;
+    if (mpiRank==rankToDebugf) std::cerr << "WorldBounds = " << worldBounds << std::endl;
+    for (auto g : hdf5reader.getNumGhosts())
+      if (mpiRank==rankToDebugf) std::cerr << "ghosts " << g << std::endl;
     vec2f valueRange = hdf5reader.calculateValueRange();
-
-    //std::cerr << "WB = " << worldBounds << std::endl;
+    if (mpiRank==rankToDebugf) std::cerr << "valueRange " << valueRange << std::endl;
 
     const std::vector<box3f> &myregions = hdf5reader.getMyRegions();
 
@@ -169,9 +172,10 @@ int main(int argc, char **argv)
         vec3f bx0 = (vec3f(bo)/(vec3f(levelDims[b.level]))) * worldBounds.upper;
         vec3f bx1 = (vec3f(bo+bd)/(vec3f(levelDims[b.level]))) * worldBounds.upper;
         if (b.owningrank == mpiRank)
-          std::cerr << "IN:  " << index << " " << b.owningrank << " " << b.level << " "
-                    << bo << "+" << bd << "|"
-                    << bx0 << ".." << bx1 << std::endl;
+          if (mpiRank==rankToDebugf)
+            std::cerr << "IN:  " << index << " " << b.owningrank << " " << b.level << " "
+                      << bo << "+" << bd << "|"
+                      << bx0 << ".." << bx1 << std::endl;
         boxes.push_back(b);
         index++;
       }
@@ -190,12 +194,13 @@ int main(int argc, char **argv)
         {
           vec3i bo = b.origin;
           vec3i bd = b.dims;
-          vec3f bx0 = ((vec3f(bo)+vec3f(+0.0f))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
-          vec3f bx1 = ((vec3f(bo+bd)+vec3f(0.f))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
+          vec3f bx0 = ((vec3f(bo)+vec3f(-0.5f))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
+          vec3f bx1 = ((vec3f(bo+bd)+vec3f(0.5f))/(vec3f(levelDims[b.level]))) * worldBounds.upper;
           wombatRegions.push_back(box3f(vec3f(bx0.x,bx0.y,bx0.z),vec3f(bx1.x,bx1.y,bx1.z)));
-          std::cerr << "OUT: " << index << " " << (b.owningrank==mpiRank?"*":"") << b.owningrank << " " << b.level << " "
-                    << bo << "+" << bd << "|"
-                    << bx0 << ".." << bx1 << std::endl;
+          if (mpiRank==rankToDebugf)
+            std::cerr << "OUT: " << index << " " << (b.owningrank==mpiRank?"*":"") << b.owningrank << " " << b.level << " "
+                      << bo << "+" << bd << "|"
+                      << bx0 << ".." << bx1 << std::endl;
         }
       }
       brick.bounds = wombatRegions;
@@ -207,27 +212,12 @@ int main(int argc, char **argv)
     brick.model = cpp::VolumetricModel(brick.brick);
     cpp::TransferFunction tfn("piecewiseLinear");
 #if 1
-    //approximately OK for binary data in reality
-    //green at 0 to emphasize problems
-    std::vector<vec3f> colors = {vec3f(0.f,1.f,0.f), vec3f(0.0f), vec3f(0.f, 0.f, 1.f), vec3f(0.f), vec3f(1.f, 0.f, 0.f), vec3f(0.f)};
-    std::vector<float> opacities = {1.0f, 0.5f, 0.5f, 0.15f, 0.0f, 0.00f};
-    //vec2f valueRange = vec2f(0.0, 0.96435); //binary
-    //vec2f valueRange = vec2f(0.0, 4000.0); //outmatter
+    //BinaryBH
+    std::vector<vec3f> colors = {vec3f(0.0f), vec3f(0.f, 0.f, 1.f), vec3f(0.f), vec3f(1.f, 0.f, 0.f), vec3f(0.f)};
+    std::vector<float> opacities = {0.01f, 0.5f, 0.15f, 0.01f, 0.01f};
 #else
-    std::vector<vec3f> colors;
-    std::vector<float> opacities;
-    colors.push_back(vec3f(0.0,1.0,0.0)); //green to test if non-local is visible
-    opacities.push_back(0.0);
-    int maxcolor = mpiWorldSize+1;
-    if (fakeWorldSize > -1) {
-      maxcolor = fakeWorldSize+1;
-    }
-    std::cerr << "WS " << maxcolor << std::endl;
-    for (int i = 0; i < maxcolor; i++) {
-      colors.push_back(vec3f((float)i/maxcolor,0.0,1.0-(float)i/maxcolor));
-      opacities.push_back(0.95);
-    }
-    vec2f valueRange = vec2f(0.0, maxcolor);
+    std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
+    std::vector<float> opacities = {0.0f, 1.0f};
 #endif
 
     tfn.setParam("color", cpp::CopiedData(colors));
@@ -257,11 +247,9 @@ int main(int argc, char **argv)
 #else
     cpp::Renderer renderer("mpiRaycast");
 #endif
-    const char *samples = getenv("DDMSAMPLES");
+    const char *sampleRateEnv = getenv("SAMPLERATE");
     float sampleRate = 1.0;
-    if (samples)
-      sampleRate = std::stof(std::string(samples));
-    std::cerr << "SAMPLE RATE IS " << sampleRate << std::endl;
+    if (sampleRateEnv) sampleRate = std::stof(std::string(sampleRateEnv));
     renderer.setParam("volumeSamplingRate", sampleRate);
 
     // create and setup an ambient light

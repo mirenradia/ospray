@@ -6,6 +6,7 @@
 #include "wombat.h"
 
 extern int fakeWorldSize;
+extern int rankToDebugf;
 
 namespace ChomboHDF5 {
 
@@ -501,6 +502,7 @@ int Reader::readBlocks()
       myRegion.lower = lf * cellWidth;
       myRegion.upper = uf * cellWidth;
       m_myRegions.push_back(myRegion);
+      if (m_mpiRank == rankToDebugf) std::cerr << "bbi " << blockBound << " bbf " << myRegion << std::endl;
     }
   }
 
@@ -584,7 +586,7 @@ int Reader::readBlockData(const std::string &a_compName)
     for (int iblock = 0; iblock < m_numBlocksPerLevel[ilev]; ++iblock) {
       // first read in the data if it's owned by this rank
       if (m_mpiRank == m_rankDataOwner[iblock]) {
-        std::cerr << m_mpiRank << " " << ilev << ":" << iblock << "/" << m_numBlocksPerLevel[ilev] << " read" << std::endl;
+        if (m_mpiRank==rankToDebugf) std::cerr << m_mpiRank << " " << ilev << ":" << iblock << "/" << m_numBlocksPerLevel[ilev] << " read" << std::endl;
 #if 0
         int rankdata = m_mpiRank+1;
         if (fakeWorldSize > -1)
@@ -739,8 +741,7 @@ void Reader::createVolume()
   volume.setParam("gridOrigin", vec3f(-m_numGhosts[0] * m_cellWidths[0]));
   volume.setParam("gridSpacing", vec3f(m_cellWidths[0]));
   volume.setParam("block.data", ospray::cpp::CopiedData(blockData));
-  volume.setParam(
-      "block.bounds", ospray::cpp::CopiedData(m_ghostedBlockBounds));
+  volume.setParam("block.bounds", ospray::cpp::CopiedData(m_ghostedBlockBounds));
   volume.setParam("block.level", ospray::cpp::CopiedData(m_blockLevels));
   volume.setParam("cellWidth", ospray::cpp::CopiedData(m_cellWidths));
 
