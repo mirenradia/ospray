@@ -496,8 +496,10 @@ int Reader::readBlocks()
       const box3i &blockBound = m_blockBounds[ibox];
       const int level = m_blockLevels[ibox];
       const float cellWidth = m_cellWidths[level];
-      myRegion.lower = blockBound.lower * cellWidth;
-      myRegion.upper = (blockBound.upper + 1) * cellWidth;
+      vec3f lf(vec3f(blockBound.lower) - vec3f(0.5));
+      vec3f uf(vec3f(blockBound.upper) + vec3f(0.5));
+      myRegion.lower = lf * cellWidth;
+      myRegion.upper = uf * cellWidth;
       m_myRegions.push_back(myRegion);
     }
   }
@@ -710,9 +712,9 @@ void Reader::setSingleBlockData(int a_levelBlockIdx, int a_level, float a_value)
 {
   int globalBlockIdx = levelToGlobalBlockIdx(a_levelBlockIdx, a_level);
   box3i &block = m_blockBounds[globalBlockIdx];
-  hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x + 1)
-      * (block.upper.y - block.lower.y + 1)
-      * (block.upper.z - block.lower.z + 1));
+  hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x + 1 + 2 * m_numGhosts[a_level][0])
+      * (block.upper.y - block.lower.y + 1 + 2 * m_numGhosts[a_level][1])
+      * (block.upper.z - block.lower.z + 1 + 2 * m_numGhosts[a_level][2]));
   m_blockDataVector[globalBlockIdx] = std::vector<float>(numCells, a_value);
 }
 
