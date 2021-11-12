@@ -185,6 +185,7 @@ class Reader
   int levelToGlobalBlockIdx(int a_levelBlockIdx, int a_level);
 
   void setRankDataOwner();
+  void computeBoxfs();
 
   // read all block data and also ghost information (so sets
   // m_ghostedBlockBounds)

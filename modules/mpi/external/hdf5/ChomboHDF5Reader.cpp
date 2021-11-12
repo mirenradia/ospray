@@ -325,7 +325,9 @@ Reader::Reader(const std::string &a_filename,
   readMainHeader();
   readLevelHeaders();
   readBlocks();
+  setRankDataOwner();
   readBlockData(a_compName);
+  computeBoxfs();
   createVolume();
   m_handle.close();
 }
@@ -490,22 +492,6 @@ int Reader::readBlocks()
   }
   std::cout << std::flush;
   */
-  setRankDataOwner();
-  for (int ibox = 0; ibox < m_totalNumBlocks; ++ibox) {
-    if (m_rankDataOwner[ibox] == m_mpiRank) {
-      box3f myRegion;
-      const box3i &blockBound = m_blockBounds[ibox];
-      const int level = m_blockLevels[ibox];
-      const float cellWidth = m_cellWidths[level];
-      vec3f lf(vec3f(blockBound.lower) - vec3f(0.5));
-      vec3f uf(vec3f(blockBound.upper) + vec3f(0.5));
-      myRegion.lower = lf * cellWidth;
-      myRegion.upper = uf * cellWidth;
-      m_myRegions.push_back(myRegion);
-      if (m_mpiRank == rankToDebugf) std::cerr << "bbi " << blockBound << " bbf " << myRegion << std::endl;
-    }
-  }
-
   m_blocksRead = true;
   return 0;
 }
@@ -586,14 +572,7 @@ int Reader::readBlockData(const std::string &a_compName)
     for (int iblock = 0; iblock < m_numBlocksPerLevel[ilev]; ++iblock) {
       // first read in the data if it's owned by this rank
       if (m_mpiRank == m_rankDataOwner[iblock]) {
-        if (m_mpiRank==rankToDebugf) std::cerr << m_mpiRank << " " << ilev << ":" << iblock << "/" << m_numBlocksPerLevel[ilev] << " read" << std::endl;
-#if 0
-        int rankdata = m_mpiRank+1;
-        if (fakeWorldSize > -1)
-          rankdata = iblock%fakeWorldSize+1;
-        std::cerr << iblock << " " << rankdata << std::endl;
-        setSingleBlockData(iblock, ilev, rankdata);
-#else
+        if (m_mpiRank==rankToDebugf) std::cerr << ilev << ":" << iblock << "/" << m_numBlocksPerLevel[ilev] << " read" << std::endl;
         err = readSingleBlockData(
             iblock, ilev, comp, level_dataset_id, level_dataspace_id);
         if (err < 0) {
@@ -601,9 +580,7 @@ int Reader::readBlockData(const std::string &a_compName)
           H5Dclose(level_dataset_id);
           return err;
         }
-#endif
       } else {
-
         wombat::remoteValueMode rvm = wombat::DATA;
         float remoteValue = 0.0;
         wombat::getRemoteValue(rvm, remoteValue);
@@ -718,6 +695,35 @@ void Reader::setSingleBlockData(int a_levelBlockIdx, int a_level, float a_value)
       * (block.upper.y - block.lower.y + 1 + 2 * m_numGhosts[a_level][1])
       * (block.upper.z - block.lower.z + 1 + 2 * m_numGhosts[a_level][2]));
   m_blockDataVector[globalBlockIdx] = std::vector<float>(numCells, a_value);
+}
+
+void Reader::computeBoxfs()
+{
+  for (int i = 0; i < m_totalNumBlocks; i++)
+  {
+    box3i &block = m_blockBounds[i];
+    box3i &gblock = m_ghostedBlockBounds[i];
+    if (m_rankDataOwner[i] == m_mpiRank) {
+      //block.lower = block.lower - vec3i(1);
+      //block.upper = block.upper + vec3i(1);
+      //gblock.lower = gblock.lower - vec3i(1);
+      //gblock.upper = gblock.upper + vec3i(1);
+
+      box3f myRegion;
+      const int level = m_blockLevels[i];
+      const float cellWidth = m_cellWidths[level];
+      vec3f lf(vec3f(block.lower) - vec3f(0.5));
+      vec3f uf(vec3f(block.upper) + vec3f(0.5));
+      myRegion.lower = lf * cellWidth;
+      myRegion.upper = uf * cellWidth;
+      m_myRegions.push_back(myRegion);
+    } else {
+      //block.lower = block.lower + vec3i(1);
+      //block.upper = block.upper - vec3i(1);
+      //gblock.lower = gblock.lower + vec3i(1);
+      //gblock.upper = gblock.upper - vec3i(1);
+    }
+  }
 }
 
 void Reader::createVolume()
