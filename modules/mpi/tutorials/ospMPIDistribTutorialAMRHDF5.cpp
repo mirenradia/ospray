@@ -214,7 +214,7 @@ int main(int argc, char **argv)
 #if 1
     //BinaryBH
     std::vector<vec3f> colors = {vec3f(0.0f), vec3f(0.f, 0.f, 1.f), vec3f(0.f), vec3f(1.f, 0.f, 0.f), vec3f(0.f)};
-    std::vector<float> opacities = {0.01f, 0.5f, 0.15f, 0.01f, 0.01f};
+    std::vector<float> opacities = {0.00f, 0.5f, 0.01f, 0.00f, 0.00f};
 #else
     std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
     std::vector<float> opacities = {0.0f, 1.0f};

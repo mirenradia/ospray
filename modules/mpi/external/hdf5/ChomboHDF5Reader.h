@@ -186,6 +186,7 @@ class Reader
 
   void setRankDataOwner();
   void computeBoxfs();
+  void removeRemotes();
 
   // read all block data and also ghost information (so sets
   // m_ghostedBlockBounds)

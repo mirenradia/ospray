@@ -328,6 +328,7 @@ Reader::Reader(const std::string &a_filename,
   setRankDataOwner();
   readBlockData(a_compName);
   computeBoxfs();
+  removeRemotes();
   createVolume();
   m_handle.close();
 }
@@ -571,7 +572,7 @@ int Reader::readBlockData(const std::string &a_compName)
 
     for (int iblock = 0; iblock < m_numBlocksPerLevel[ilev]; ++iblock) {
       // first read in the data if it's owned by this rank
-      if (m_mpiRank == m_rankDataOwner[iblock]) {
+      if (m_mpiRank == m_rankDataOwner[iblock] || ilev == 0) {
         if (m_mpiRank==rankToDebugf) std::cerr << ilev << ":" << iblock << "/" << m_numBlocksPerLevel[ilev] << " read" << std::endl;
         err = readSingleBlockData(
             iblock, ilev, comp, level_dataset_id, level_dataspace_id);
@@ -581,6 +582,7 @@ int Reader::readBlockData(const std::string &a_compName)
           return err;
         }
       } else {
+#if 0
         wombat::remoteValueMode rvm = wombat::DATA;
         float remoteValue = 0.0;
         wombat::getRemoteValue(rvm, remoteValue);
@@ -604,6 +606,7 @@ int Reader::readBlockData(const std::string &a_compName)
         default:
             setSingleBlockData(iblock, ilev, remoteValue);
         }
+#endif
       }
       // now adjust the block bounds for ghosts
       int globalBlockIdx = levelToGlobalBlockIdx(iblock, ilev);
@@ -691,9 +694,10 @@ void Reader::setSingleBlockData(int a_levelBlockIdx, int a_level, float a_value)
 {
   int globalBlockIdx = levelToGlobalBlockIdx(a_levelBlockIdx, a_level);
   box3i &block = m_blockBounds[globalBlockIdx];
-  hsize_t numCells = static_cast<hsize_t>((block.upper.x - block.lower.x + 1 + 2 * m_numGhosts[a_level][0])
+  hsize_t numCells = 1;/*
+      static_cast<hsize_t>((block.upper.x - block.lower.x + 1 + 2 * m_numGhosts[a_level][0])
       * (block.upper.y - block.lower.y + 1 + 2 * m_numGhosts[a_level][1])
-      * (block.upper.z - block.lower.z + 1 + 2 * m_numGhosts[a_level][2]));
+      * (block.upper.z - block.lower.z + 1 + 2 * m_numGhosts[a_level][2]));*/
   m_blockDataVector[globalBlockIdx] = std::vector<float>(numCells, a_value);
 }
 
@@ -756,6 +760,30 @@ void Reader::createVolume()
   m_volume = volume;
 }
 
+void Reader::removeRemotes()
+{
+  std::vector<std::vector<float>> my_blockDataVector;
+  std::vector<int> my_blockLevels;
+  std::vector<rkcommon::math::box3i> my_ghostedBlockBounds;
+
+  for (int ilev = 0; ilev < m_numLevels; ++ilev) {
+      for (int iblock = 0; iblock < m_numBlocksPerLevel[ilev]; ++iblock) {
+        // first read in the data if it's owned by this rank
+        if (m_mpiRank == m_rankDataOwner[iblock] || ilev == 0) {
+            int globalBlockIdx = levelToGlobalBlockIdx(iblock, ilev);
+            my_blockDataVector.push_back(m_blockDataVector[globalBlockIdx]);
+            my_blockLevels.push_back(m_blockLevels[globalBlockIdx]);
+            my_ghostedBlockBounds.push_back(m_ghostedBlockBounds[globalBlockIdx]);
+        }
+      }
+  }
+
+  if (m_mpiRank == rankToDebugf) std::cerr << "HEY I(" << m_mpiRank << ") only have " << my_blockDataVector.size() << " of " << m_blockDataVector.size() << "blocks" << std::endl;
+  m_blockDataVector = my_blockDataVector;
+  m_ghostedBlockBounds = my_ghostedBlockBounds;
+  m_blockLevels = my_blockLevels;
+}
+
 vec2f Reader::calculateValueRange()
 {
   if (!m_blockDataRead) {
@@ -768,22 +796,20 @@ vec2f Reader::calculateValueRange()
   bool myFirstBox = true;
   vec2f localMinMax;
 
-  for (int ibox = 0; ibox < m_totalNumBlocks; ++ibox) {
-    if (m_rankDataOwner[ibox] == m_mpiRank) {
-      const std::vector<float> &blockData = m_blockDataVector[ibox];
-      auto minmax_its = std::minmax_element(blockData.begin(), blockData.end());
-      float blockMin = *(minmax_its.first);
-      float blockMax = *(minmax_its.second);
-      if (myFirstBox) {
-        localMinMax[0] = blockMin;
-        localMinMax[1] = blockMax;
-        myFirstBox = false;
-      } else {
-        localMinMax[0] =
-            (localMinMax[0] > blockMin) ? blockMin : localMinMax[0];
-        localMinMax[1] =
-            (localMinMax[1] < blockMax) ? blockMax : localMinMax[1];
-      }
+  for (int ibox = 0; ibox < m_blockDataVector.size(); ++ibox) {
+    const std::vector<float> &blockData = m_blockDataVector[ibox];
+    auto minmax_its = std::minmax_element(blockData.begin(), blockData.end());
+    float blockMin = *(minmax_its.first);
+    float blockMax = *(minmax_its.second);
+    if (myFirstBox) {
+      localMinMax[0] = blockMin;
+      localMinMax[1] = blockMax;
+      myFirstBox = false;
+    } else {
+      localMinMax[0] =
+          (localMinMax[0] > blockMin) ? blockMin : localMinMax[0];
+      localMinMax[1] =
+          (localMinMax[1] < blockMax) ? blockMax : localMinMax[1];
     }
   }
 
